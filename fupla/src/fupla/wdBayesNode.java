@@ -4,6 +4,7 @@ public class wdBayesNode {
 
 	public double[] xyCount;		// Count for x val and the y val
 	public double[] xyProbability;		// Count for x val and the y val
+	public double[] xyParameter;
 
 	wdBayesNode[] children;	
 
@@ -23,6 +24,7 @@ public class wdBayesNode {
 
 		xyCount = new double[nc * paramsPerAttVal];
 		xyProbability = new double[nc * paramsPerAttVal];
+		xyParameter = new double[nc * paramsPerAttVal];
 		
 		children = null;
 	}  
@@ -32,7 +34,15 @@ public class wdBayesNode {
 		att = -1;
 		children = null;
 	}      
+	
+	public void setXYParameter(int v, int y, double val) {
+		xyParameter[y * paramsPerAttVal + v] = val;
+	}
 
+	public double getXYParameter(int v, int y) {
+		return xyParameter[y * paramsPerAttVal + v];		
+	}
+	
 	public void setXYCount(int v, int y, double val) {
 		xyCount[y * paramsPerAttVal + v] = val;
 	}
@@ -41,6 +51,14 @@ public class wdBayesNode {
 		return xyCount[y * paramsPerAttVal + v];		
 	}
 
+	public void incrementXYCount(int v, int y) {
+		xyCount[y * paramsPerAttVal + v]++;
+	}
+
+	public void decrementXYCount(int v, int y) {
+		xyCount[y * paramsPerAttVal + v]--;
+	}
+	
 	public void setXYProbability(int v, int y, double val) {
 		xyProbability[y * paramsPerAttVal + v] = val;
 	}
@@ -48,17 +66,9 @@ public class wdBayesNode {
 	public double getXYProbability(int v, int y) {
 		return xyProbability[y * paramsPerAttVal + v];		
 	}
-
+	
 	public int getXYIndex(int v, int y) {
 		return index + (y * paramsPerAttVal + v);
-	}
-
-	public void incrementXYCount(int v, int y) {
-		xyCount[y * paramsPerAttVal + v]++;
-	}
-
-	public void decrementXYCount(int v, int y) {
-		xyCount[y * paramsPerAttVal + v]--;
 	}
 
 	public double updateClassDistribution(int value, int c) {

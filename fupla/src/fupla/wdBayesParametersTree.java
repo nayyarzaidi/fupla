@@ -1,13 +1,15 @@
 package fupla;
 
-import java.util.Arrays;
-
 import weka.core.Instance;
 import weka.core.Instances;
 
 public class wdBayesParametersTree {
+	
+	private double[] parameters;
+	private int np;
 
 	private wdBayesNode[] wdBayesNode_;
+	private int[] activeNumNodes;
 
 	private int N;
 	private int n;
@@ -17,7 +19,6 @@ public class wdBayesParametersTree {
 
 	private int[] order;
 	private int[][] parents;
-
 
 	private double[] classCounts;
 	private double[] classProbabilities;
@@ -40,6 +41,8 @@ public class wdBayesParametersTree {
 		for (int u = 0; u < n; u++) {
 			order[u] = m_Order[u];
 		}
+		
+		activeNumNodes = new int[n];	
 
 		for (int u = 0; u < n; u++) {
 			if (m_Parents[u] != null) {
@@ -156,7 +159,7 @@ public class wdBayesParametersTree {
 			convertCountToProbs(order[u], parents[u], wdBayesNode_[u]);
 		}
 	}
-	
+
 	public void convertCountToProbs(int u, int[] lparents, wdBayesNode pt) {
 
 		int att = pt.att;
@@ -208,64 +211,64 @@ public class wdBayesParametersTree {
 		return;
 	}
 
-//	public void convertCountToProbs(int u, int[] lparents, wdBayesNode pt) {
-//
-//		int att = pt.att;
-//
-//		if (att == -1) {
-//			int[][] tempArray = new int[m_ParamsPerAtt[u]][nc];
-//			for (int y = 0; y < nc; y++) {
-//				for (int uval = 0; uval < m_ParamsPerAtt[u]; uval++) {
-//					tempArray[uval][y] = (int) pt.getXYCount(uval, y);
-//				}
-//			}
-//			for (int y = 0; y < nc; y++) {
-//				for (int uval = 0; uval < m_ParamsPerAtt[u]; uval++) {
-//					int denom = 0;
-//					for (int dval = 0; dval < m_ParamsPerAtt[u]; dval++) {
-//						denom += tempArray[dval][y];
-//					}
-//					double prob = Math.log(Math.max(SUtils.MEsti(tempArray[uval][y], denom, m_ParamsPerAtt[u]),1e-75));
-//					pt.setXYProbability(uval, y, prob);
-//				}
-//			}			
-//			return;
-//		}
-//
-//		while (att != -1) {
-//			/*
-//			 * Now convert non-leaf node counts to probs
-//			 */
-//			int[][] tempArray = new int[m_ParamsPerAtt[u]][nc];
-//			for (int y = 0; y < nc; y++) {
-//				for (int uval = 0; uval < m_ParamsPerAtt[u]; uval++) {
-//					tempArray[uval][y] = (int) pt.getXYCount(uval, y);
-//				}
-//			}
-//			for (int y = 0; y < nc; y++) {
-//				for (int uval = 0; uval < m_ParamsPerAtt[u]; uval++) {
-//					int denom = 0;
-//					for (int dval = 0; dval < m_ParamsPerAtt[u]; dval++) {
-//						denom += tempArray[dval][y];
-//					}
-//					double prob = Math.log(Math.max(SUtils.MEsti(tempArray[uval][y], denom, m_ParamsPerAtt[u]),1e-75));
-//					pt.setXYProbability(uval, y, prob);
-//				}
-//			}
-//
-//			int numChildren = pt.children.length;
-//			for (int c = 0; c < numChildren; c++) {
-//				wdBayesNode next = pt.children[c];
-//				if (next != null) 					
-//					convertCountToProbs(u, lparents, next);
-//
-//				// Flag end of nodes
-//				att = -1;				
-//			}			
-//		}
-//
-//		return;
-//	}
+	//	public void convertCountToProbs(int u, int[] lparents, wdBayesNode pt) {
+	//
+	//		int att = pt.att;
+	//
+	//		if (att == -1) {
+	//			int[][] tempArray = new int[m_ParamsPerAtt[u]][nc];
+	//			for (int y = 0; y < nc; y++) {
+	//				for (int uval = 0; uval < m_ParamsPerAtt[u]; uval++) {
+	//					tempArray[uval][y] = (int) pt.getXYCount(uval, y);
+	//				}
+	//			}
+	//			for (int y = 0; y < nc; y++) {
+	//				for (int uval = 0; uval < m_ParamsPerAtt[u]; uval++) {
+	//					int denom = 0;
+	//					for (int dval = 0; dval < m_ParamsPerAtt[u]; dval++) {
+	//						denom += tempArray[dval][y];
+	//					}
+	//					double prob = Math.log(Math.max(SUtils.MEsti(tempArray[uval][y], denom, m_ParamsPerAtt[u]),1e-75));
+	//					pt.setXYProbability(uval, y, prob);
+	//				}
+	//			}			
+	//			return;
+	//		}
+	//
+	//		while (att != -1) {
+	//			/*
+	//			 * Now convert non-leaf node counts to probs
+	//			 */
+	//			int[][] tempArray = new int[m_ParamsPerAtt[u]][nc];
+	//			for (int y = 0; y < nc; y++) {
+	//				for (int uval = 0; uval < m_ParamsPerAtt[u]; uval++) {
+	//					tempArray[uval][y] = (int) pt.getXYCount(uval, y);
+	//				}
+	//			}
+	//			for (int y = 0; y < nc; y++) {
+	//				for (int uval = 0; uval < m_ParamsPerAtt[u]; uval++) {
+	//					int denom = 0;
+	//					for (int dval = 0; dval < m_ParamsPerAtt[u]; dval++) {
+	//						denom += tempArray[dval][y];
+	//					}
+	//					double prob = Math.log(Math.max(SUtils.MEsti(tempArray[uval][y], denom, m_ParamsPerAtt[u]),1e-75));
+	//					pt.setXYProbability(uval, y, prob);
+	//				}
+	//			}
+	//
+	//			int numChildren = pt.children.length;
+	//			for (int c = 0; c < numChildren; c++) {
+	//				wdBayesNode next = pt.children[c];
+	//				if (next != null) 					
+	//					convertCountToProbs(u, lparents, next);
+	//
+	//				// Flag end of nodes
+	//				att = -1;				
+	//			}			
+	//		}
+	//
+	//		return;
+	//	}
 
 	//probability when using leave one out cross validation, the t value is discounted
 	public double ploocv(int y, int x_C) {
@@ -457,32 +460,212 @@ public class wdBayesParametersTree {
 		return pt;		
 	}
 
-	public wdBayesNode getBayesNode(Instance instance, int i, int k) {	
+	public void cleanUp(int m_BestattIt, int m_BestK_) {
 
-		wdBayesNode pt = wdBayesNode_[i];
-		int att = pt.att;
-		int level = 0;
-
-		if (k == 0) {
-			return pt;
+		for (int i = m_BestattIt; i < n; i++) {
+			wdBayesNode_[i] = null;
 		}
 
-		// find the appropriate leaf
-		while (att != -1 && level < k) {
-			int v = (int) instance.value(att);
-			wdBayesNode next = pt.children[v];
-			if (next == null) 
-				break;
-			pt = next;
-			att = pt.att;
-			level++;
+		for (int i = 0; i < m_BestattIt; i++) {
+			if (parents[i] != null) {
+				if (parents[i].length > m_BestK_) {
+					int level = -1;
+					deleteExtraNodes(wdBayesNode_[i], m_BestK_, level);
+				}	
+			}
 		}
-
-		return pt;		
 	}
 
-	public int getNAttributes() {
-		return n;
+	public void deleteExtraNodes(wdBayesNode pt, int k, int level) {
+		
+		level = level + 1;
+		
+		int att = pt.att;
+
+		while (att != -1) {
+
+			int numChildren = pt.children.length;
+			for (int c = 0; c < numChildren; c++) {
+				wdBayesNode next = pt.children[c];
+				
+				if (level == k) {
+					pt.children[c] = null;
+					pt.att = -1;
+					next = null;
+				}
+				
+				if (next != null) 
+					deleteExtraNodes(next, k, level);
+
+				att = -1;
+			}
+		}
+
+	}
+	
+	/* 
+	 * -----------------------------------------------------------------------------------------
+	 * Allocate Parameters
+	 * -----------------------------------------------------------------------------------------
+	 */	
+
+	public void allocate() {
+		// count active nodes in Trie
+		np = nc;
+		for (int u = 0; u < n; u++) {
+			wdBayesNode pt = wdBayesNode_[u];
+			activeNumNodes[u] = countActiveNumNodes(u, order[u], parents[u], pt);
+		}		
+		System.out.println("Allocating dParameters of size: " + np);
+		parameters = new double[np];				
+	}
+
+	public int countActiveNumNodes(int i, int u, int[] lparents, wdBayesNode pt) {
+		int numNodes = 0;		
+		int att = pt.att;
+
+		if (att == -1) {
+			pt.index = np;
+			np += m_ParamsPerAtt[u] * nc;			
+			return 1;			
+		}			
+
+		while (att != -1) {
+			int numChildren = pt.children.length;
+			for (int c = 0; c < numChildren; c++) {
+				wdBayesNode next = pt.children[c];
+				if (next != null)
+					numNodes += countActiveNumNodes(i, u, lparents, next);
+				att = -1;
+			}			
+		}
+
+		return numNodes;
+	}
+	
+	/* 
+	 * -----------------------------------------------------------------------------------------
+	 * xyParameters to Parameters
+	 * -----------------------------------------------------------------------------------------
+	 */	
+	
+	public void reset() {		
+		// convert a trie into an array
+		for (int u = 0; u < n; u++) {
+			wdBayesNode pt = wdBayesNode_[u];
+			trieToArray(u, order[u], parents[u], pt);
+		}		
+	}
+
+	private int trieToArray(int i, int u, int[] parents, wdBayesNode pt) {		
+		int att = pt.att;
+
+		if (att == -1) {
+			int index = pt.index;
+			for (int j = 0; j < m_ParamsPerAtt[u]; j++) {
+				for (int c = 0; c < nc; c++) {
+					//System.out.println(index + (c * paramsPerAtt[u] + j));
+					parameters[index + (c * m_ParamsPerAtt[u] + j)] = pt.getXYParameter(j, c);
+				}				
+			}			
+			return 0;
+		}			
+
+		while (att != -1) {
+			int numChildren = pt.children.length;
+			for (int c = 0; c < numChildren; c++) {
+				wdBayesNode next = pt.children[c];
+				if (next != null)
+					trieToArray(i, u, parents, next);
+				att = -1;
+			}			
+		}
+
+		return 0;		
+	}
+	
+	// ----------------------------------------------------------------------------------
+	// Parameters to xyParameters
+	// ----------------------------------------------------------------------------------
+
+	public void copyParameters(double[] params) {
+		for (int i = 0; i < params.length; i++) {
+			parameters[i] = params[i];
+		}		
+
+		// convert an array into a trie
+		for (int u = 0; u < n; u++) {
+			wdBayesNode pt = wdBayesNode_[u];
+			arrayToTrie(u, order[u], parents[u], pt);			
+		}		
+	}
+
+	private int arrayToTrie(int i, int u, int[] parents, wdBayesNode pt) {
+		int att = pt.att;
+
+		if (att == -1) {
+			int index = pt.index;
+			for (int j = 0; j < m_ParamsPerAtt[u]; j++) {
+				for (int c = 0; c < nc; c++) {
+					double val = parameters[index + (c * m_ParamsPerAtt[u] + j)];
+					pt.setXYParameter(j, c, val);
+				}				
+			}			
+			return 0;
+		}			
+
+		while (att != -1) {
+			int numChildren = pt.children.length;
+			for (int c = 0; c < numChildren; c++) {
+				wdBayesNode next = pt.children[c];
+				if (next != null)
+					arrayToTrie(i, u, parents, next);
+				att = -1;
+			}			
+		}
+
+		return 0;	
+	}
+	
+	// ----------------------------------------------------------------------------------
+	// initialize xyParameters with val 
+	// ----------------------------------------------------------------------------------
+
+	public void initializeParametersWithVal(double initVal) {
+		for (int c = 0; c < nc; c++) {
+			parameters[c] = initVal;
+		}
+		for (int u = 0; u < n; u++) {
+			wdBayesNode pt = wdBayesNode_[u];
+			initializeParametersWithVal(u, order[u], parents[u], pt, initVal);
+		}
+	}
+
+	private int initializeParametersWithVal(int i, int u, int[] parents, wdBayesNode pt, double initVal) {		
+		int att = pt.att;
+
+		if (att == -1) {
+			int index = pt.index;
+			for (int j = 0; j < m_ParamsPerAtt[u]; j++) {
+				for (int c = 0; c < nc; c++) {
+					pt.setXYParameter(j, c, initVal);	
+					parameters[index + (c * m_ParamsPerAtt[u] + j)] = initVal;
+				}				
+			}			
+			return 0;
+		}			
+
+		while (att != -1) {
+			int numChildren = pt.children.length;
+			for (int c = 0; c < numChildren; c++) {
+				wdBayesNode next = pt.children[c];
+				if (next != null)
+					initializeParametersWithVal(i, u, parents, next, initVal);
+				att = -1;
+			}			
+		}
+
+		return 0;		
 	}
 
 	public double getNLL_MAP(Instances instances) {
@@ -514,6 +697,22 @@ public class wdBayesParametersTree {
 		}
 
 		return nll;
+	}
+	
+	public double[] getParameters() {
+		return parameters;
+	}
+
+	public int getNp() {
+		return np;
+	}
+
+	public int setNAttributes(int newn) {
+		return n = newn;
+	}
+	
+	public int getNAttributes() {
+		return n;
 	}
 
 	public double[] getClassCounts() {
