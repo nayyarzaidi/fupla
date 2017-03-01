@@ -9,6 +9,7 @@ import java.util.concurrent.Future;
 
 import weka.classifiers.AbstractClassifier;
 import optimize.Minimizer;
+import optimize.MinimizerTron;
 import optimize.DifferentiableFunction;
 import optimize.FunctionValues;
 
@@ -54,6 +55,8 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 	int m_BestattIt = 0;
 
 	ObjectiveFunction function_to_optimize;
+
+	private String m_O = "Tron";                                   // -S
 
 	@Override
 	public void buildClassifier(Instances instances) throws Exception {
@@ -248,7 +251,7 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 
 		// Allocate dParameters after cleaning-up
 		dParameters_.allocate();
-		dParameters_.initializeParametersWithVal(1.0);
+		dParameters_.initializeParametersWithVal(0);
 
 
 		/* 
@@ -259,30 +262,51 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 
 		if (m_DoDiscriminative) {
 
-			if (m_MultiThreaded) {
-				function_to_optimize = new ParallelObjectiveFunction();
-			} else {
+			if (m_O.equalsIgnoreCase("Tron")) {
+
 				function_to_optimize = new ObjectiveFunction();
+
+				int maxIterations = 10;
+				double eps = 0.0001;
+				
+				MinimizerTron alg = new MinimizerTron();
+				alg.setMaxIterations(maxIterations);
+				Result result;	
+
+				System.out.print("fx_Tron_ =  [");
+				result = alg.run(function_to_optimize, dParameters_.getParameters(), eps);
+				System.out.println("];");
+				System.out.println("NoIter = " + result.iterationsInfo.iterations);
+				System.out.println();
+
+
+			} else if (m_O.equalsIgnoreCase("QN")) {
+
+				if (m_MultiThreaded) {
+					function_to_optimize = new ParallelObjectiveFunction();
+				} else {
+					function_to_optimize = new ObjectiveFunction();
+				}
+
+				double maxGradientNorm = 0.000000000000000000000000000000001;
+				int m_MaxIterations = 10;
+
+				Minimizer alg = new Minimizer();
+				StopConditions sc = alg.getStopConditions();
+				sc.setMaxGradientNorm(maxGradientNorm);
+				sc.setMaxIterations(m_MaxIterations);
+				Result result;
+
+				System.out.println();
+				System.out.print("fx_QN_" + " = [");
+				alg.setIterationFinishedListener((p,nll,g)->{System.out.print(nll+", "); return true;});
+				result = alg.run(function_to_optimize, dParameters_.getParameters());
+				System.out.println("];");
+				//System.out.println(result);
+				System.out.println("NoIter = " + result.iterationsInfo.iterations); System.out.println();
+
+				function_to_optimize.finish();
 			}
-
-			double maxGradientNorm = 0.000000000000000000000000000000001;
-			int m_MaxIterations = 10000;
-
-			Minimizer alg = new Minimizer();
-			StopConditions sc = alg.getStopConditions();
-			sc.setMaxGradientNorm(maxGradientNorm);
-			sc.setMaxIterations(m_MaxIterations);
-			Result result;
-
-			System.out.println();
-			System.out.print("fx_QN_" + " = [");
-			alg.setIterationFinishedListener((p,nll,g)->{System.out.print(nll+", "); return true;});
-			result = alg.run(function_to_optimize, dParameters_.getParameters());
-			System.out.println("];");
-			//System.out.println(result);
-			System.out.println("NoIter = " + result.iterationsInfo.iterations); System.out.println();
-			
-			function_to_optimize.finish();
 		}
 
 	}
@@ -293,16 +317,14 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 		double[] probs = new double[nc];
 
 		for (int c = 0; c < nc; c++) {
-			probs[c] = dParameters_.getParameters()[c] * 
-					dParameters_.getClassProbabilities()[c];
+			probs[c] = dParameters_.getParameters()[c]; // * dParameters_.getClassProbabilities()[c];
 
 			for (int u = 0; u < n; u++) {
 				double uval = inst.value(m_Order[u]);
-				
+
 				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
 
-				probs[c] += wd.getXYParameter((int)uval, c) *
-						wd.getXYProbability((int)uval, c);
+				probs[c] += wd.getXYParameter((int)uval, c); // * wd.getXYProbability((int)uval, c);
 			}
 		}
 
@@ -312,6 +334,14 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 	}
 
 	class ObjectiveFunction implements DifferentiableFunction {
+
+		double[][][] D;
+
+		public ObjectiveFunction() {
+			if (m_O.equalsIgnoreCase("Tron")) {
+				D = new double[N][nc][nc];
+			}
+		}
 
 		@Override
 		public FunctionValues getValues(double[] params) {
@@ -349,17 +379,13 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 			double[] probs = new double[nc];
 
 			for (int c = 0; c < nc; c++) {
-				probs[c] = dParameters_.getParameters()[c] * 
-						dParameters_.getClassProbabilities()[c];
+				probs[c] = dParameters_.getParameters()[c]; // * dParameters_.getClassProbabilities()[c];
 
 				for (int u = 0; u < n; u++) {
 					double uval = inst.value(m_Order[u]);
-					
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-					probs[c] += wd.getXYParameter((int)uval, c) * wd.getXYProbability((int)uval, c);
 
-					//probs[c] += dParameters_.getBayesNode(inst, u).getXYParameter((int)uval, c) *
-					//		dParameters_.getBayesNode(inst, u).getXYProbability((int)uval, c);
+					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+					probs[c] += wd.getXYParameter((int)uval, c); // * wd.getXYProbability((int)uval, c);
 
 				}
 			}
@@ -370,20 +396,18 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 
 		private void computeGrad(Instance inst, double[] probs, int x_C, double[] gradients) {
 			for (int c = 0; c < nc; c++) {
-				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * 
-						dParameters_.getClassProbabilities()[c];
+				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]); // * dParameters_.getClassProbabilities()[c];
 			}
 
 			for (int u = 0; u < n; u++) {
 				double uval = inst.value(m_Order[u]);
-				
+
 				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
 
 				for (int c = 0; c < nc; c++) {
 					int posp = wd.getXYIndex((int)uval, c);
 
-					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * 
-							wd.getXYProbability((int)uval, c);
+					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]); // * wd.getXYProbability((int)uval, c);
 				}
 
 			}
@@ -401,26 +425,212 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 		@Override
 		public void finish() {
 			// TODO Auto-generated method stub
+
+		}
+
+		@Override
+		public int get_nr_variable() {
+			return dParameters_.getNp();
+		}
+
+		@Override
+		public double fun() {
+			boolean regularization = false;
+
+			double mLogNC = -Math.log(nc);
+			double f = 0.0;
+
+			for (int i = 0; i < m_Instances.numInstances(); i++) {
+				Instance inst = m_Instances.instance(i);
+				int x_C = (int) inst.classValue();
+				double[] probs = predict(inst);
+				f += (mLogNC - probs[x_C]);			
+			}
+
+			if (regularization) {
+				f += regularizeFunction();
+			}
+
+			return f;
+		}
+
+		@Override
+		public double fun(double[] point) {
+
+			boolean regularization = false;
+
+			double mLogNC = -Math.log(nc);
+			double f = 0.0;
+			
+			int np = dParameters_.getNp();
+			
+			double[] oldParameters = new double[np];
+			System.arraycopy(dParameters_.getParameters(), 0, oldParameters, 0, np);
+
+			dParameters_.copyParameters(point);
+
+			for (int i = 0; i < m_Instances.numInstances(); i++) {
+				Instance inst = m_Instances.instance(i);
+				int x_C = (int) inst.classValue();
+				double[] probs = predict(inst);
+				f += (mLogNC - probs[x_C]);
+			}
+
+			if (regularization) {
+				f += regularizeFunction();
+			}
+
+			//System.arraycopy(oldParameters, 0, dParameters_.getParameters(), 0, np);
+			dParameters_.copyParameters(oldParameters);
+
+			return f;
+		}
+
+		@Override
+		public void grad(double[] grad) {
+
+			boolean regularization = false;
+
+			double mLogNC = -Math.log(nc);
+			double f = 0.0;
+
+			int np = dParameters_.getNp();
+
+			for (int i = 0; i < np; i++) {
+				grad[i] = 0;
+			}
+
+			for (int i = 0; i < m_Instances.numInstances(); i++) {
+				Instance inst = m_Instances.instance(i);
+				int x_C = (int) inst.classValue();
+				double[] probs = predict(inst);
+				f += (mLogNC - probs[x_C]);
+				SUtils.exp(probs);
+
+				computeGrad(inst, probs, x_C, grad);
+
+				computeHessian(i, probs);
+			}
+
+			if (regularization) {
+				regularizeGradient(grad);
+			}
+
+		}
+
+		@Override
+		public void Hv(double[] s, double[] Hs) {
+		
+			int np = dParameters_.getNp();
+
+			double[] wa = new double[N * nc];
+			double[] wa2 = new double[N * nc];
+
+			int[] offset = new int[nc];
+			int index = 0;
+			for (int c = 0; c < nc; c++) {
+				offset[c] = index;
+				index += N;
+			}
+
+			//Xv(s, wa);
+			for (int i = 0; i < m_Instances.numInstances(); i++) {
+				Instance inst = m_Instances.instance(i);
+
+				for (int c = 0; c < nc; c++) {
+
+					wa[i + offset[c]] += s[c];
+
+					for (int u = 0; u < n; u++) {
+						double uval = inst.value(m_Order[u]);
+
+						wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+						int pos = wd.getXYIndex((int)uval, c);
+
+						wa[i + offset[c]] += s[pos];
+					}
+
+				}
+			}
+
+			//D[i] * wa[i];
+			for (int i = 0; i < m_Instances.numInstances(); i++) {
+				for (int c1 = 0; c1 < nc; c1++) {					
+					for (int c2 = 0; c2 < nc; c2++) {
+						wa2[i + offset[c1]] += (D[i][c1][c2] * wa[i + offset[c2]]);
+					}
+				}
+			}
+
+			//XTv(wa, Hs);
+			for (int i = 0; i < np; i++) {
+				Hs[i] = 0;
+			}
+
+			for (int i = 0; i < m_Instances.numInstances(); i++) {
+				Instance inst = m_Instances.instance(i);
+
+				for (int c = 0; c < nc; c++) {
+
+					Hs[c] += wa2[i + offset[c]];
+
+					for (int u = 0; u < n; u++) {
+						double uval = inst.value(m_Order[u]);
+
+						wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+						int pos = wd.getXYIndex((int)uval, c);
+
+						Hs[pos] += wa2[i + offset[c]];
+					}
+
+				}
+			}	
+
+			//s[i] + Hs[i];
+			for (int i = 0; i < np; i++) {
+				Hs[i] = s[i] + Hs[i];
+			}
 			
 		}
 
+		public void computeHessian(int i, double[] probs) {
+			for (int c1 = 0; c1 < nc; c1++) {
+				for (int c2 = 0; c2 < nc; c2++) {
+
+					if (c1 == c2) {
+						D[i][c1][c2] = (1 - probs[c1]) * probs[c1];
+					} else {
+						D[i][c1][c2] = -probs[c1] * probs[c2];
+					}
+
+				}			
+			}
+		}
+
+		
+		@Override
+		public void initializeParameters(double[] w_new) {
+			dParameters_.copyParameters(w_new);
+		}
+
+
 	};
-	
+
 	class ParallelObjectiveFunction extends ObjectiveFunction {
-		
+
 		private static final int minNPerThread = 10000;
-		
+
 		wdBayesNode[][] nodes;
 		int nThreads;
 		double[][] gs;
 		private double[][] tmpProbs;
 		private ExecutorService executor;
 		int np;
-		
+
 		public ParallelObjectiveFunction() {
-			
+
 			np = dParameters_.getNp(); 
-			
+
 			if (N < minNPerThread) {
 				nThreads=1;
 			} else {
@@ -434,7 +644,7 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 			this.gs = new double[nThreads][np];
 			this.tmpProbs = new double[nThreads][nc];
 			executor = Executors.newFixedThreadPool(nThreads);
-			
+
 			System.out.println("Will be launching: " + nThreads + " Threads.");
 		}
 
@@ -442,7 +652,7 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 		public FunctionValues getValues(double[] params) {
 
 			double f = 0.0;
-			
+
 			dParameters_.copyParameters(params);
 			double gradients[] = new double[np];
 
@@ -450,7 +660,7 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 
 			int assigned = 0;
 			int remaining = N;
-			
+
 			for (int th = 0; th < nThreads; th++) {
 				/*
 				 * Compute the start and stop indexes for thread th
@@ -467,7 +677,7 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 				Callable<Double> thread = new CallableCLL_w(m_Instances, start, stop, nc, nodes[th], tmpProbs[th], gs[th], dParameters_, m_Order);
 				futures[th] = executor.submit(thread);
 			}
-			
+
 			for (int th = 0; th < nThreads; th++) {
 				try {
 					f += futures[th].get();
@@ -483,8 +693,8 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 					gradients[i] += gs[th][i];
 				}
 			}
-			
-			 return new FunctionValues(f, gradients);
+
+			return new FunctionValues(f, gradients);
 		}
 
 		@Override
@@ -492,9 +702,9 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 			executor.shutdown();
 		}
 	};
-	
+
 	public class CallableCLL_w implements Callable<Double>{
-		
+
 		private Instances instances;
 		private int start;
 		private int stop;
@@ -505,10 +715,10 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 		private int nc;
 		private double[] g;
 		private double mLogNC;
-		
+
 		public CallableCLL_w(Instances m_Instances, int start, int stop, int nc, wdBayesNode[] nodes,
 				double[] myProbs, double[] g, wdBayesParametersTree dParameters_, int[] order) {
-			
+
 			this.instances = instances;
 			this.start = start;
 			this.stop = stop;
@@ -519,14 +729,14 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 			this.dParameters = dParameters;
 			this.order = order;
 			this.mLogNC = -Math.log(nc); 	
-			
+
 		}
 
 		@Override
 		public Double call() throws Exception {
 			double f = 0.0;
 			Arrays.fill(g, 0.0);
-			
+
 			for (int i = start; i <= stop; i++) {
 				Instance inst = m_Instances.instance(i);
 				int x_C = (int) inst.classValue();
@@ -536,24 +746,22 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 
 				computeGrad(inst, probs, x_C, g);
 			}
-			
+
 			return f;
 		}
-		
+
 		private double[] predict(Instance inst) {
 			double[] probs = new double[nc];
 
 			for (int c = 0; c < nc; c++) {
-				probs[c] = dParameters_.getParameters()[c] * 
-						dParameters_.getClassProbabilities()[c];
+				probs[c] = dParameters_.getParameters()[c]; // * dParameters_.getClassProbabilities()[c];
 
 				for (int u = 0; u < n; u++) {
 					double uval = inst.value(m_Order[u]);
-					
+
 					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
 
-					probs[c] += wd.getXYParameter((int)uval, c) *
-							wd.getXYProbability((int)uval, c);
+					probs[c] += wd.getXYParameter((int)uval, c); // * wd.getXYProbability((int)uval, c);
 
 				}
 			}
@@ -564,25 +772,23 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 
 		private void computeGrad(Instance inst, double[] probs, int x_C, double[] gradients) {
 			for (int c = 0; c < nc; c++) {
-				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * 
-						dParameters_.getClassProbabilities()[c];
+				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]); // * dParameters_.getClassProbabilities()[c];
 			}
 
 			for (int u = 0; u < n; u++) {
 				double uval = inst.value(m_Order[u]);
-				
+
 				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
 
 				for (int c = 0; c < nc; c++) {
 					int posp = wd.getXYIndex((int)uval, c);
 
-					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * 
-							wd.getXYProbability((int)uval, c);
+					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]); // * wd.getXYProbability((int)uval, c);
 				}
 
 			}
 		}
-		
+
 	}
 
 	// ----------------------------------------------------------------------------------
