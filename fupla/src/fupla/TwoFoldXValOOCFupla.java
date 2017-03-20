@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.BitSet;
 
@@ -19,20 +20,23 @@ import weka.core.converters.Saver;
 public class TwoFoldXValOOCFupla {
 
 	private static String data = "";
-	private static String m_OutputResults = "";
-
+	
 	private static boolean m_MVerb = false; 					// -V
 	private static int m_KDB = 1;										// -K
 
 	private static boolean m_DoSKDB = false;				// -S
 	private static boolean m_DoDiscriminative = false; 	// -D
 	
+	private static String m_O = "adagrad";                       // -O
+	
 	private static Instances instances = null;
 	private static int m_nExp = 5;
-
+	
 	public static final int BUFFER_SIZE = 10*1024*1024; 	//100MB
-
+	
 	public static void main(String[] args) throws Exception {
+		
+		System.out.println("Executing TwoFoldXValOOCFupla");
 
 		setOptions(args);
 
@@ -57,7 +61,7 @@ public class TwoFoldXValOOCFupla {
 		structure.setClassIndex(structure.numAttributes() - 1);
 		int nc = structure.numClasses();
 		int N = getNumData(sourceFile, structure);
-		System.out.println("read "+N+" datapoints");
+		System.out.println("Read " + N + " datapoints");
 
 		double m_RMSE = 0;
 		double m_Error = 0;
@@ -68,6 +72,10 @@ public class TwoFoldXValOOCFupla {
 		 * Start m_nExp rounds of Experiments
 		 */
 		for (int exp = 0; exp < m_nExp; exp++) {
+			
+			if (m_MVerb) {
+				System.out.println("Experiment No. " + exp);
+			}
 
 			MersenneTwister rg = new MersenneTwister(seed);
 			BitSet test0Indexes = getTest0Indexes(sourceFile, structure, rg);
@@ -82,13 +90,16 @@ public class TwoFoldXValOOCFupla {
 			learner.setM_DoSKDB(m_DoSKDB);
 			learner.setM_DoDiscriminative(m_DoDiscriminative);
 			learner.setRandomGenerator(rg);
-			
+			learner.setM_O(m_O);
+
 			// creating tempFile for train0
 			File trainFile = createTrainTmpFile(sourceFile, structure, test0Indexes);
-			System.out.println("generated train");
+			System.out.println("Train file generated");
+			
 			if (m_MVerb) {
 				System.out.println("Training fold 0: trainFile is '" + trainFile.getAbsolutePath() + "'");
 			}
+			
 			learner.buildClassifier(trainFile);
 
 			// ---------------------------------------------------------
@@ -103,7 +114,7 @@ public class TwoFoldXValOOCFupla {
 			int thisNTest = 0;
 			reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), 100000);
 			while ((current = reader.readInstance(structure)) != null) {
-				//if (test0Indexes.get(lineNo)) {
+				if (test0Indexes.get(lineNo)) {
 					double[] probs = new double[nc];
 					probs = learner.distributionForInstance(current);
 					int x_C = (int) current.classValue();
@@ -131,7 +142,7 @@ public class TwoFoldXValOOCFupla {
 
 					thisNTest++;
 					NTest++;
-				//}
+				}
 				lineNo++;
 			}
 
@@ -156,7 +167,8 @@ public class TwoFoldXValOOCFupla {
 			learner.setM_DoSKDB(m_DoSKDB);
 			learner.setM_DoDiscriminative(m_DoDiscriminative);
 			learner.setRandomGenerator(rg);
-			
+			learner.setM_O(m_O);
+
 			// creating tempFile for train0
 			trainFile = createTrainTmpFile(sourceFile, structure, test1Indexes);
 
@@ -213,6 +225,7 @@ public class TwoFoldXValOOCFupla {
 
 			seed++;
 		} // Ends No. of Experiments
+		
 
 		System.out.print("\nBias-Variance Decomposition\n");
 		System.out.print("\nClassifier   : FuplaOOC (K = " + m_KDB + ")");
@@ -220,7 +233,7 @@ public class TwoFoldXValOOCFupla {
 		System.out.print("\nError           : " + Utils.doubleToString(m_Error / NTest, 6, 4));
 		System.out.print("\nRMSE          : " + Utils.doubleToString(Math.sqrt(m_RMSE / NTest), 6, 4));
 		System.out.print("\n\n\n");
-		
+
 	}
 
 	public static int ind(int i, int j) {
@@ -234,11 +247,6 @@ public class TwoFoldXValOOCFupla {
 			data = Strain;
 		}
 
-		String Soutput = Utils.getOption('O', options);
-		if (Soutput.length() != 0) {
-			m_OutputResults = Soutput;
-		}
-	
 		m_MVerb = Utils.getFlag('V', options);
 
 		String MK = Utils.getOption('K', options);
@@ -254,6 +262,11 @@ public class TwoFoldXValOOCFupla {
 			m_nExp = Integer.valueOf(strX);
 		}
 
+		String Soutput = Utils.getOption('O', options);
+		if (Soutput.length() != 0) {
+			m_O = Soutput;
+		}
+		
 		Utils.checkForRemainingOptions(options);
 
 	}
@@ -262,9 +275,9 @@ public class TwoFoldXValOOCFupla {
 		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), 100000);
 		int nLines = 0;
 		while (reader.readInstance(structure) != null) {
-		    if(nLines%1000000==0){
-			System.out.println(nLines);
-		    }
+			if(nLines%1000000==0){
+				System.out.println(nLines);
+			}
 			nLines++;
 		}
 		return nLines;
@@ -319,9 +332,9 @@ public class TwoFoldXValOOCFupla {
 		Instance current;
 		int lineNo = 0;
 		while ((current = reader.readInstance(structure)) != null) {
-			//if (!testIndexes.get(lineNo)) {
+			if (!testIndexes.get(lineNo)) {
 				fileSaver.writeIncremental(current);
-			//}
+			}
 			lineNo++;
 		}
 		fileSaver.writeIncremental(null);

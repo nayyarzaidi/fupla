@@ -55,7 +55,7 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 
 	ObjectiveFunction function_to_optimize;
 
-	private String m_O = "Tron";                                   // -S
+	private String m_O = "QN";                                   // -S
 
 	@Override
 	public void buildClassifier(Instances instances) throws Exception {
@@ -197,7 +197,11 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 				}	
 			}
 
-			/* Start the book keeping, select the best k and best attributes */
+			/*
+			 *  ------------------------------------------------------------------
+			 * Start the book keeping, select the best k and best attributes 
+			 * ------------------------------------------------------------------- 
+			  */
 			for (int k = 0; k <= m_KDB; k++) {
 				System.out.println("k = " + k);
 				for (int u = 0; u < n; u++){
@@ -235,6 +239,9 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 				}
 				System.out.println(foldLossFunctallK_[k][n]);
 			}
+			
+			if (m_BestattIt > n) 
+				m_BestattIt = 0;
 
 			System.out.println("Number of features selected is: " + m_BestattIt);
 			System.out.println("best k is: " + m_BestK_);
@@ -265,7 +272,7 @@ public class fupla extends AbstractClassifier implements OptionHandler {
 
 				function_to_optimize = new ObjectiveFunction();
 
-				int maxIterations = 100;
+				int maxIterations = 1000;
 				double eps = 0.0001;
 				
 				MinimizerTron alg = new MinimizerTron();
