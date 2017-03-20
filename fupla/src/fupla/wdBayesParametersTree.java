@@ -628,6 +628,92 @@ public class wdBayesParametersTree {
 	}
 	
 	// ----------------------------------------------------------------------------------
+	// update xyParameters based on eps * gradient 
+	// ----------------------------------------------------------------------------------
+	
+	public void updateParameters(double alpha, double[] grad) {
+		for (int c = 0; c < nc; c++) {
+			parameters[c] = parameters[c] - (alpha * grad[c]);
+		}
+		for (int u = 0; u < n; u++) {
+			wdBayesNode pt = wdBayesNode_[u];
+			updateParameters(u, order[u], parents[u], pt, alpha, grad);
+		}
+	}
+	
+	private int updateParameters(int i, int u, int[] parents, wdBayesNode pt, double alpha, double[] grad) {		
+		int att = pt.att;
+
+		if (att == -1) {
+			int index = pt.index;
+			for (int j = 0; j < m_ParamsPerAtt[u]; j++) {
+				for (int c = 0; c < nc; c++) {
+					int location = index + (c * m_ParamsPerAtt[u] + j);
+					
+					double newval = pt.getXYParameter(j, c) - (alpha * grad[location]);
+					
+					pt.setXYParameter(j, c, newval);	
+					parameters[index + (c * m_ParamsPerAtt[u] + j)] = newval;
+				}				
+			}			
+			return 0;
+		}			
+
+		while (att != -1) {
+			int numChildren = pt.children.length;
+			for (int c = 0; c < numChildren; c++) {
+				wdBayesNode next = pt.children[c];
+				if (next != null)
+					updateParameters(i, u, parents, next, alpha, grad);
+				att = -1;
+			}			
+		}
+
+		return 0;		
+	}
+	
+	public void updateParameters(double[] stepSize, double[] grad) {
+		for (int c = 0; c < nc; c++) {
+			parameters[c] = parameters[c] - (stepSize[c] * grad[c]);
+		}
+		for (int u = 0; u < n; u++) {
+			wdBayesNode pt = wdBayesNode_[u];
+			updateParameters(u, order[u], parents[u], pt, stepSize, grad);
+		}
+	}
+	
+	private int updateParameters(int i, int u, int[] parents, wdBayesNode pt, double[] stepSize, double[] grad) {		
+		int att = pt.att;
+
+		if (att == -1) {
+			int index = pt.index;
+			for (int j = 0; j < m_ParamsPerAtt[u]; j++) {
+				for (int c = 0; c < nc; c++) {
+					int location = index + (c * m_ParamsPerAtt[u] + j);
+					
+					double newval = pt.getXYParameter(j, c) - (stepSize[location] * grad[location]);
+					
+					pt.setXYParameter(j, c, newval);	
+					parameters[index + (c * m_ParamsPerAtt[u] + j)] = newval;
+				}				
+			}			
+			return 0;
+		}			
+
+		while (att != -1) {
+			int numChildren = pt.children.length;
+			for (int c = 0; c < numChildren; c++) {
+				wdBayesNode next = pt.children[c];
+				if (next != null)
+					updateParameters(i, u, parents, next, stepSize, grad);
+				att = -1;
+			}			
+		}
+
+		return 0;		
+	}
+	
+	// ----------------------------------------------------------------------------------
 	// initialize xyParameters with val 
 	// ----------------------------------------------------------------------------------
 

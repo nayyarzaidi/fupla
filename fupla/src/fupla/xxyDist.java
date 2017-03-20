@@ -267,7 +267,10 @@ public class xxyDist {
 
 	public int getNoData() { return N; }
 	
-	public void setNoData() { N++; }
+	public void setNoData() {
+		xyDist_.setNoData();
+		N++; 
+	}
 
 	public int getNoClasses() { return nc; }
 
