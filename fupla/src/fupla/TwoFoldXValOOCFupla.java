@@ -6,7 +6,10 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.HashMap;
+import java.util.List;
 
 import org.apache.commons.math3.random.MersenneTwister;
 
@@ -20,22 +23,24 @@ import weka.core.converters.Saver;
 public class TwoFoldXValOOCFupla {
 
 	private static String data = "";
-	
+
 	private static boolean m_MVerb = false; 					// -V
 	private static int m_KDB = 1;										// -K
 
 	private static boolean m_DoSKDB = false;				// -S
 	private static boolean m_DoDiscriminative = false; 	// -D
-	
+
 	private static String m_O = "adagrad";                       // -O
-	
+
+	private static boolean m_DoWANBIAC = false;               // -W
+
 	private static Instances instances = null;
 	private static int m_nExp = 5;
-	
+
 	public static final int BUFFER_SIZE = 10*1024*1024; 	//100MB
-	
+
 	public static void main(String[] args) throws Exception {
-		
+
 		System.out.println("Executing TwoFoldXValOOCFupla");
 
 		setOptions(args);
@@ -71,8 +76,21 @@ public class TwoFoldXValOOCFupla {
 		/*
 		 * Start m_nExp rounds of Experiments
 		 */
+
+		int lineNo = 0;
+		Instance current;
+		reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), 100000);
+		while ((current = reader.readInstance(structure)) != null) {
+			lineNo++;
+		}
+
+		//ArrayList<ArrayList<Double>> instanceProbs = new ArrayList<ArrayList<Double>>();
+		//HashMap instancesProbs = new HashMap();
+
+		double[][] instanceProbs = new double[lineNo][nc];
+
 		for (int exp = 0; exp < m_nExp; exp++) {
-			
+
 			if (m_MVerb) {
 				System.out.println("Experiment No. " + exp);
 			}
@@ -84,22 +102,28 @@ public class TwoFoldXValOOCFupla {
 			// Train on Fold 0
 			// ---------------------------------------------------------
 
-			fuplaOOC learner = new fuplaOOC();
+			//fuplaOOC learner = new fuplaOOC();
+			//fuplaOOCReg learner = new fuplaOOCReg();
+			hfuplaOOC learner = new hfuplaOOC();
+
 			learner.setM_MVerb(m_MVerb);
 			learner.setM_KDB(m_KDB);
 			learner.setM_DoSKDB(m_DoSKDB);
 			learner.setM_DoDiscriminative(m_DoDiscriminative);
 			learner.setRandomGenerator(rg);
 			learner.setM_O(m_O);
+			if (m_DoWANBIAC) {
+				learner.setM_DoWANBIAC(m_DoWANBIAC);
+			}
 
 			// creating tempFile for train0
 			File trainFile = createTrainTmpFile(sourceFile, structure, test0Indexes);
 			System.out.println("Train file generated");
-			
+
 			if (m_MVerb) {
 				System.out.println("Training fold 0: trainFile is '" + trainFile.getAbsolutePath() + "'");
 			}
-			
+
 			learner.buildClassifier(trainFile);
 
 			// ---------------------------------------------------------
@@ -109,9 +133,9 @@ public class TwoFoldXValOOCFupla {
 				System.out.println("Testing fold 0 started");
 			}
 
-			int lineNo = 0;
-			Instance current;
 			int thisNTest = 0;
+
+			lineNo = 0;
 			reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), 100000);
 			while ((current = reader.readInstance(structure)) != null) {
 				if (test0Indexes.get(lineNo)) {
@@ -142,6 +166,13 @@ public class TwoFoldXValOOCFupla {
 
 					thisNTest++;
 					NTest++;
+
+					ArrayList<Double> classprobs = new ArrayList();
+					for (int y = 0; y < nc; y++) {
+						classprobs.add(probs[y]);
+					}
+
+					instanceProbs[lineNo][pred]++;
 				}
 				lineNo++;
 			}
@@ -161,13 +192,19 @@ public class TwoFoldXValOOCFupla {
 			// ---------------------------------------------------------
 			// Train on Fold 1
 			// ---------------------------------------------------------
-			learner = new fuplaOOC();
+			//learner = new fuplaOOC();
+			//learner = new fuplaOOCReg();
+			learner = new hfuplaOOC();
+
 			learner.setM_MVerb(m_MVerb);
 			learner.setM_KDB(m_KDB);
 			learner.setM_DoSKDB(m_DoSKDB);
 			learner.setM_DoDiscriminative(m_DoDiscriminative);
 			learner.setRandomGenerator(rg);
 			learner.setM_O(m_O);
+			if (m_DoWANBIAC) {
+				learner.setM_DoWANBIAC(m_DoWANBIAC);
+			}
 
 			// creating tempFile for train0
 			trainFile = createTrainTmpFile(sourceFile, structure, test1Indexes);
@@ -215,6 +252,8 @@ public class TwoFoldXValOOCFupla {
 					}
 
 					NTest++;
+
+					instanceProbs[lineNo][pred]++;
 				}
 				lineNo++;
 			}
@@ -225,12 +264,42 @@ public class TwoFoldXValOOCFupla {
 
 			seed++;
 		} // Ends No. of Experiments
-		
+
+
+		double m_Bias = 0;
+		double m_Sigma = 0;
+		double m_Variance = 0;
+
+		lineNo = 0;
+		reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), 100000);
+		while ((current = reader.readInstance(structure)) != null) {
+			double[] predProbs = instanceProbs[lineNo];
+
+			double pActual, pPred;
+			double bsum = 0, vsum = 0, ssum = 0;
+			for (int j = 0; j < nc; j++) {
+				pActual = (current.classValue() == j) ? 1 : 0;
+				pPred = predProbs[j] / m_nExp;
+				bsum += (pActual - pPred) * (pActual - pPred) - pPred * (1 - pPred) / (m_nExp - 1);
+				vsum += (pPred * pPred);
+				ssum += pActual * pActual;
+			}
+			m_Bias += bsum;
+			m_Variance += (1 - vsum);
+			m_Sigma += (1 - ssum);
+
+			lineNo++;
+		}
+
+		m_Bias = m_Bias / (2 * lineNo);
+		m_Variance = (m_Error / NTest) - m_Bias;
 
 		System.out.print("\nBias-Variance Decomposition\n");
-		System.out.print("\nClassifier   : FuplaOOC (K = " + m_KDB + ")");
-		System.out.print( "\nData File    : " + data);
+		System.out.print("\nClassifier	   : FuplaOOC (K = " + m_KDB + ")");
+		System.out.print( "\nData File   : " + data);
 		System.out.print("\nError           : " + Utils.doubleToString(m_Error / NTest, 6, 4));
+		System.out.print("\nBias^2        : " + Utils.doubleToString(m_Bias, 6, 4));
+		System.out.print("\nVariance     : " + Utils.doubleToString(m_Variance, 6, 4));
 		System.out.print("\nRMSE          : " + Utils.doubleToString(Math.sqrt(m_RMSE / NTest), 6, 4));
 		System.out.print("\n\n\n");
 
@@ -266,7 +335,9 @@ public class TwoFoldXValOOCFupla {
 		if (Soutput.length() != 0) {
 			m_O = Soutput;
 		}
-		
+
+		m_DoWANBIAC = Utils.getFlag('W', options); 
+
 		Utils.checkForRemainingOptions(options);
 
 	}

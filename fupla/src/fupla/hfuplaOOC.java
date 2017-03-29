@@ -17,7 +17,7 @@ import weka.core.converters.ArffLoader.ArffReader;
 import org.apache.commons.math3.random.MersenneTwister;
 import org.apache.commons.math3.random.RandomGenerator;
 
-public class fuplaOOC {
+public class hfuplaOOC {
 
 	private Instances structure;
 
@@ -27,7 +27,7 @@ public class fuplaOOC {
 	public int[] paramsPerAtt;
 
 	public xxyDist xxyDist_;
-	public wdBayesParametersTree dParameters_;
+	public wdBayesHierarchicalParametersTree dParameters_;
 
 	private int[][] m_Parents;
 	private int[] m_Order;
@@ -37,7 +37,7 @@ public class fuplaOOC {
 	private boolean m_DoDiscriminative = false;			// -D
 	private int m_KDB = 1; 											// -K
 	private String m_O = "adagrad";								// -O
-	
+
 	private boolean m_DoWANBIAC = false;               // -W
 
 	int m_BestK_ = 0; 
@@ -45,13 +45,13 @@ public class fuplaOOC {
 
 	private RandomGenerator rg = null;
 	private static final int BUFFER_SIZE = 100000;
-	
-	private static int maxIterations = 50;						// -I 
 
+	private static int maxIterations = 1;						// -I 
+	
 	public void buildClassifier(File sourceFile) throws Exception {
 
-		System.out.println("[----- fuplaOOC -----]: Reading structure -- " + sourceFile);
-		
+		System.out.println("[----- hfuplaOOC -----]: Reading structure -- " + sourceFile);
+
 		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
 		this.structure = reader.getStructure();
 		structure.setClassIndex(structure.numAttributes() - 1);
@@ -138,7 +138,7 @@ public class fuplaOOC {
 		 * ------------------------------------------------------ 
 		 */
 
-		dParameters_ = new wdBayesParametersTree(n, nc, paramsPerAtt, m_Order, m_Parents, 1);
+		dParameters_ = new wdBayesHierarchicalParametersTree(n, nc, paramsPerAtt, m_Order, m_Parents, 1);
 
 		// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 		// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -153,8 +153,6 @@ public class fuplaOOC {
 		// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 		dParameters_.countsToProbability();
-
-		//System.out.println(dParameters_.getNLL_MAP(m_Instances));
 
 		if (m_DoSKDB) {
 
@@ -331,7 +329,7 @@ public class fuplaOOC {
 
 						// Updated parameters
 						dParameters_.updateParameters(alpha, gradients);
-						
+
 						numdata++;
 
 						if (numdata % 1000 == 0) {
@@ -352,7 +350,8 @@ public class fuplaOOC {
 				double smoothingParameter = 1e-9;
 
 				System.out.println("Finding Alpha (adagrad), Please Wait");
-				double alpha = optimizeAlphaADAGRAD(sourceFile, instancesTrain, instancesTest, smoothingParameter);
+				//double alpha = optimizeAlphaADAGRAD(sourceFile, instancesTrain, instancesTest, smoothingParameter);
+				double alpha = 0.0001;
 				System.out.println("Using alpha = " + alpha);
 
 				double[] G = new double[np];
@@ -776,6 +775,7 @@ public class fuplaOOC {
 		return alpha[SUtils.minLocationInAnArray(perf)];
 	}
 
+	
 	private double[] predict(Instance inst) {
 		double[] probs = new double[nc];
 		
@@ -783,76 +783,71 @@ public class fuplaOOC {
 			for (int c = 0; c < nc; c++) {
 				probs[c] = dParameters_.getParameters()[c] * dParameters_.getClassProbabilities()[c];
 
-
 				for (int u = 0; u < n; u++) {
-					double uval = inst.value(m_Order[u]);
-
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-					probs[c] += wd.getXYParameter((int)uval, c) * wd.getXYProbability((int)uval, c);
+					wdBayesNode pt = dParameters_.getBayesNode(u);
+					dParameters_.resetProb();
+					int uval = (int)inst.value(m_Order[u]);
+					probs[c] += dParameters_.predict(inst, u, uval, c, pt);
 				}
 			}
 		} else {
 			for (int c = 0; c < nc; c++) {
 				probs[c] = dParameters_.getParameters()[c];
 
-
 				for (int u = 0; u < n; u++) {
-					double uval = inst.value(m_Order[u]);
-
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-					probs[c] += wd.getXYParameter((int)uval, c);
+					wdBayesNode pt = dParameters_.getBayesNode(u);
+					dParameters_.resetProb();
+					int uval = (int)inst.value(m_Order[u]);
+					probs[c] += dParameters_.predict(inst, u, uval, c, pt);
 				}
 			}
 		}
+		
 
 		SUtils.normalizeInLogDomain(probs);
 		return probs;
 	}
 
 	private void computeGrad(Instance inst, double[] probs, int x_C, double[] gradients) {
-		
+
 		if (m_DoWANBIAC) {
+
 			for (int c = 0; c < nc; c++) {
 				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
 			}
 
 			for (int u = 0; u < n; u++) {
-				double uval = inst.value(m_Order[u]);
-
-				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
+				wdBayesNode pt = dParameters_.getBayesNode(u);
+				int uval = (int)inst.value(m_Order[u]);
+				
 				for (int c = 0; c < nc; c++) {
-					int posp = wd.getXYIndex((int)uval, c);
-
-					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c);
+					dParameters_.gradients(inst, u, uval, c, pt, gradients, probs);
 				}
 			}
+
 		} else {
+
 			for (int c = 0; c < nc; c++) {
-				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
 			}
 
 			for (int u = 0; u < n; u++) {
-				double uval = inst.value(m_Order[u]);
-
-				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
+				wdBayesNode pt = dParameters_.getBayesNode(u);
+				int uval = (int)inst.value(m_Order[u]);
+				
 				for (int c = 0; c < nc; c++) {
-					int posp = wd.getXYIndex((int)uval, c);
-
-					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+					dParameters_.gradients(inst, u, uval, c, pt, gradients, probs);
 				}
 			}
+
 		}
-	
+
 	}
 
 	private void computeHessian(Instance inst, double[] probs, int x_C, double[] hessians) {
-		
+
 		if (m_DoWANBIAC) {
-			
+
 			double[] d =new double[nc];
 
 			for (int c = 0;  c < nc; c++) {
@@ -875,9 +870,9 @@ public class fuplaOOC {
 					hessians[posp] += (d[c] * wd.getXYProbability((int)uval, c) * wd.getXYProbability((int)uval, c)); 
 				}
 			}
-			
+
 		} else {
-			
+
 			double[] d =new double[nc];
 
 			for (int c = 0;  c < nc; c++) {
@@ -901,45 +896,41 @@ public class fuplaOOC {
 				}
 			}
 		}
-		
+
 	}
+	
 
 	public double[] distributionForInstance(Instance inst) {
-		
-		double[] probs = new double[nc];
-		
-		if (m_DoWANBIAC) {
 
+		double[] probs = new double[nc];
+
+		if (m_DoWANBIAC) {
 			for (int c = 0; c < nc; c++) {
 				probs[c] = dParameters_.getParameters()[c] * dParameters_.getClassProbabilities()[c];
 
 				for (int u = 0; u < n; u++) {
-					double uval = inst.value(m_Order[u]);
-
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-					probs[c] += wd.getXYParameter((int)uval, c) * wd.getXYProbability((int)uval, c);
+					wdBayesNode pt = dParameters_.getBayesNode(u);
+					dParameters_.resetProb();
+					int uval = (int)inst.value(m_Order[u]);
+					probs[c] += dParameters_.predict(inst, u, uval, c, pt);
 				}
 			}
-			
 		} else {
-			
 			for (int c = 0; c < nc; c++) {
 				probs[c] = dParameters_.getParameters()[c];
 
 				for (int u = 0; u < n; u++) {
-					double uval = inst.value(m_Order[u]);
-
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-					probs[c] += wd.getXYParameter((int)uval, c);
+					wdBayesNode pt = dParameters_.getBayesNode(u);
+					dParameters_.resetProb();
+					int uval = (int)inst.value(m_Order[u]);
+					probs[c] += dParameters_.predict(inst, u, uval, c, pt);
 				}
 			}
-			
 		}
-
+		
 		SUtils.normalizeInLogDomain(probs);
 		SUtils.exp(probs);
+		
 		return probs;
 	}
 
@@ -961,7 +952,7 @@ public class fuplaOOC {
 
 		m_DoSKDB = Utils.getFlag('S', options);
 		m_DoDiscriminative = Utils.getFlag('D', options);
-		
+
 		m_DoWANBIAC = Utils.getFlag('W', options); 
 
 		Utils.checkForRemainingOptions(options);
@@ -979,7 +970,7 @@ public class fuplaOOC {
 		return xxyDist_;
 	}
 
-	public wdBayesParametersTree getdParameters_() {
+	public wdBayesHierarchicalParametersTree getdParameters_() {
 		return dParameters_;
 	}
 
@@ -1038,7 +1029,7 @@ public class fuplaOOC {
 	public void setM_O(String m_O) {
 		this.m_O = m_O;
 	}
-	
+
 	public boolean isM_DoWANBIAC() {
 		return m_DoWANBIAC;
 	}
