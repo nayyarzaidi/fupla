@@ -95,8 +95,7 @@ public class TwoFoldXValOOCFuplaWriter {
 			learner.setM_KDB(m_KDB);
 			learner.setM_DoSKDB(m_DoSKDB);
 			learner.setM_DoDiscriminative(m_DoDiscriminative);
-			learner.setRandomGenerator(rg);
-
+			
 			// creating tempFile for train0
 			File trainFile = createTrainTmpFile(sourceFile, structure, test0Indexes);
 			System.out.println("generated train");
@@ -178,8 +177,7 @@ public class TwoFoldXValOOCFuplaWriter {
 			learner.setM_KDB(m_KDB);
 			learner.setM_DoSKDB(m_DoSKDB);
 			learner.setM_DoDiscriminative(m_DoDiscriminative);
-			learner.setRandomGenerator(rg);
-
+			
 			// creating tempFile for train0
 			trainFile = createTrainTmpFile(sourceFile, structure, test1Indexes);
 

@@ -15,7 +15,6 @@ import weka.core.Utils;
 import weka.core.converters.ArffLoader.ArffReader;
 
 import org.apache.commons.math3.random.MersenneTwister;
-import org.apache.commons.math3.random.RandomGenerator;
 
 public class fuplaOOC {
 
@@ -37,21 +36,29 @@ public class fuplaOOC {
 	private boolean m_DoDiscriminative = false;			// -D
 	private int m_KDB = 1; 											// -K
 	private String m_O = "adagrad";								// -O
-	
-	private boolean m_DoWANBIAC = false;               // -W
+
+	private static boolean m_DoRegularization = false;		  // -R
+	private static double m_Lambda = 0.001;						  // -L
+	private static double m_Eta = 0.01;                                 // -E
+	private static boolean m_DoCrossvalidate = false;          // -C
+
+	private static int m_NumIterations = 1;                            // -I
+	private static int m_BufferSize = 1;                                  // -B
+
+	private static boolean m_DoWANBIAC = false;               // -W
+
+	double smoothingParameter = 1e-9;
 
 	int m_BestK_ = 0; 
 	int m_BestattIt = 0;
 
-	private RandomGenerator rg = null;
 	private static final int BUFFER_SIZE = 100000;
-	
-	private static int maxIterations = 50;						// -I 
+
 
 	public void buildClassifier(File sourceFile) throws Exception {
 
 		System.out.println("[----- fuplaOOC -----]: Reading structure -- " + sourceFile);
-		
+
 		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
 		this.structure = reader.getStructure();
 		structure.setClassIndex(structure.numAttributes() - 1);
@@ -75,6 +82,23 @@ public class fuplaOOC {
 		m_BestK_ = m_KDB; 
 		m_BestattIt = n;
 
+		System.out.println("Experiment Configuration");
+		System.out.println(" ----------------------------------- ");
+		System.out.println("m_KDB = " + m_KDB);
+		System.out.println("m_DoSKDB = " + m_DoSKDB);
+		System.out.println("m_DoWANBIAC = " + m_DoWANBIAC);
+		if (m_DoDiscriminative) {
+			System.out.println("m_O = " + m_O);
+			System.out.println("Iterations = " + m_NumIterations);
+			System.out.println("m_DoRegularization = " + m_DoRegularization);
+			if (m_DoRegularization) {
+				System.out.println("m_Lambda = " + m_Lambda);
+			}
+			System.out.println("m_DoCrossvalidate = " + m_DoCrossvalidate);
+		} else {
+			System.out.println(" ----------------------------------- ");
+		}
+		
 		/*
 		 *  ------------------------------------------------------
 		 * Pass No. 1
@@ -91,7 +115,6 @@ public class fuplaOOC {
 			xxyDist_.setNoData();
 			N++;
 		}		
-
 		// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 		double[] mi = new double[n];
@@ -154,8 +177,6 @@ public class fuplaOOC {
 
 		dParameters_.countsToProbability();
 
-		//System.out.println(dParameters_.getNLL_MAP(m_Instances));
-
 		if (m_DoSKDB) {
 
 			/*
@@ -207,18 +228,6 @@ public class fuplaOOC {
 
 				}	
 			}
-			// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-			// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-			// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-			/* Start the book keeping, select the best k and best attributes */
-			//			for (int k = 0; k <= m_KDB; k++) {
-			//				System.out.println("k = " + k);
-			//				for (int u = 0; u < n; u++){
-			//					System.out.print(foldLossFunctallK_[k][u] + ", ");
-			//				}
-			//				System.out.println(foldLossFunctallK_[k][n]);
-			//			}
 
 			//Proper kdb selective (RMSE)      
 			for (int k = 0; k <= m_KDB; k++) {
@@ -267,8 +276,12 @@ public class fuplaOOC {
 
 		// Allocate dParameters after cleaning-up
 		dParameters_.allocate();
-		dParameters_.initializeParametersWithVal(1);
 
+		if (m_DoDiscriminative) {
+			dParameters_.initializeParametersWithVal(0);
+		} else {
+			dParameters_.initializeParametersWithVal(1);
+		}
 
 		/* 
 		 * ------------------------------------------------------
@@ -278,7 +291,46 @@ public class fuplaOOC {
 
 		if (m_DoDiscriminative) {
 
-			int np = dParameters_.getNp();
+			if (m_O.equalsIgnoreCase("sgd")) {
+
+				doSGD(sourceFile);
+
+			} else if (m_O.equalsIgnoreCase("adaptive")) {
+
+				doAdaptive(sourceFile);
+
+			} else if (m_O.equalsIgnoreCase("adagrad")) {
+
+				doAdagrad(sourceFile);
+
+			} else if (m_O.equalsIgnoreCase("adadelta")) {
+
+				doAdadelta(sourceFile);
+
+			}
+		}
+
+		System.out.println("Finished training");
+	}
+
+	/*
+	 * -------------------------------------------------------------------------------------
+	 * Adaptive 
+	 * SGD
+	 * AdaGrad
+	 * AdaDelta
+	 * -------------------------------------------------------------------------------------
+	 */
+
+	private void doSGD(File sourceFile) throws FileNotFoundException, IOException {
+
+		System.out.println("StepSize = " + m_Eta);
+		System.out.println("BufferSize = " + m_BufferSize);
+		System.out.println(" ----------------------------------- ");
+
+		ArrayList<Integer> indexList = null;
+
+		if (m_DoCrossvalidate) {
 
 			Instances instancesTrain = null;
 			Instances instancesTest = null;
@@ -286,7 +338,7 @@ public class fuplaOOC {
 			Instances[] instanceList;
 			//instanceList = getTrainTestInstances(sourceFile, N);
 
-			ArrayList<Integer> indexList = getTrainTestIndices(N);
+			indexList = getTrainTestIndices(N);
 			instanceList = getTrainTestInstances(sourceFile, indexList);
 
 			Collections.sort(indexList);
@@ -294,208 +346,828 @@ public class fuplaOOC {
 			instancesTrain = instanceList[0];
 			instancesTest = instanceList[1];
 
-			if (m_O.equalsIgnoreCase("sgd")) {
+			System.out.println("Finding Alpha (sgd), Please Wait");
+			m_Eta = optimizeAlphaSGD(sourceFile, instancesTrain, instancesTest);
+			System.out.println("Using m_Eta (after Cross-validation) = " + m_Eta);
+		}
 
-				// alpha = learned from the data
+		System.out.print("fx_SGD = [");
 
-				System.out.println("Finding Alpha (sgd), Please Wait");
-				double alpha = optimizeAlphaSGD(sourceFile, instancesTrain, instancesTest);
-				System.out.println("Using alpha = " + alpha);
+		int np = dParameters_.getNp();
 
-				for (int i = 0; i < maxIterations; i++) {
-					System.out.println("Iteration: " + i);
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
 
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
-					this.structure = reader.getStructure();
-					structure.setClassIndex(structure.numAttributes() - 1);
+		double[] gradients = new double[np];
 
-					int numdata = 0;
+		int t = 1;
 
-					while ((row = reader.readInstance(structure)) != null)  {
+		for (int iter = 0; iter < m_NumIterations; iter++) {
 
-						if (Collections.binarySearch(indexList, numdata) >= 0) {
-							continue;
-						}
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			this.structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
 
-						double[] gradients = new double[np];
+			Instance row;
+			while ((row = reader.readInstance(structure)) != null)  {
 
-						int x_C = (int) row.classValue();
-						double[] probs = predict(row);
-						SUtils.exp(probs);
-
-						computeGrad(row, probs, x_C, gradients);
-
-						// Updated parameters
-						dParameters_.updateParameters(alpha, gradients);
-						
-						numdata++;
-
-						if (numdata % 1000 == 0) {
-							System.out.println(numdata);
-						}
-					}
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+				if (Collections.binarySearch(indexList, t) >= 0) {
+					continue;
 				}
 
-			} else if (m_O.equalsIgnoreCase("adagrad")) {
+				int x_C = (int) row.classValue();
+				double[] probs = predict(row);
+				SUtils.exp(probs);
 
-				// \alpha = \alpha_0 / \sum_ grad
-				// \alpha_0 is learned from the data
+				computeGrad(row, probs, x_C, gradients);
 
-				double smoothingParameter = 1e-9;
-
-				System.out.println("Finding Alpha (adagrad), Please Wait");
-				double alpha = optimizeAlphaADAGRAD(sourceFile, instancesTrain, instancesTest, smoothingParameter);
-				System.out.println("Using alpha = " + alpha);
-
-				double[] G = new double[np];
-
-				for (int iter = 0; iter < maxIterations; iter++) {
-					System.out.println("Iteration: " + iter);
-
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
-					this.structure = reader.getStructure();
-					structure.setClassIndex(structure.numAttributes() - 1);
-
-					int numdata = 0;
-
-					while ((row = reader.readInstance(structure)) != null)  {
-
-						if (Collections.binarySearch(indexList, numdata) >= 0) {
-							continue;
-						}
-
-						double[] gradients = new double[np];
-
-						int x_C = (int) row.classValue();
-						double[] probs = predict(row);
-						SUtils.exp(probs);
-
-						computeGrad(row, probs, x_C, gradients);
-
-						for (int j = 0; j < np; j++) {
-							G[j] += ((gradients[j] * gradients[j]));
-						}
-
-						double stepSize[] = new double[np];
-						for (int j = 0; j < np; j++) {
-							stepSize[j] = alpha / (smoothingParameter + Math.sqrt(G[j]));
-
-							if (stepSize[j] == Double.POSITIVE_INFINITY) {
-								stepSize[j] = 0.0;
-							}
-						}
-
-						// Updated parameters
-						dParameters_.updateParameters(stepSize, gradients);
-
-						numdata++;
-
-						if (numdata % 1000 == 0) {
-							System.out.println(numdata);
-						}
-					}
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+				if (m_DoRegularization) {
+					//regularizeGradient(gradients);
 				}
 
-			} else if (m_O.equalsIgnoreCase("bottousgd")) {
+				if (t % m_BufferSize == 0) {
+					double stepSize = m_Eta;
 
-			} else if (m_O.equalsIgnoreCase("plr")) {
+					dParameters_.updateParameters(stepSize, gradients);
 
-				for (int iter = 0; iter < maxIterations; iter++) {
-					System.out.println("Iteration: " + iter);
-
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
-					this.structure = reader.getStructure();
-					structure.setClassIndex(structure.numAttributes() - 1);
-
-					int numdata = 0;
-
-					double epsilon = 1e-9;
-
-					double[] gbar = new double[np];
-					double[] vbar = new double[np];
-					double[] hbar = new double[np];
-					double[] vpart = new double[np];
-					double[] taus = new double[np];
-
-					for (int i = 0; i < np; i++) {
-						gbar[i] = 0;
-						vbar[i] = 1.0 * epsilon;
-						hbar[i] = 1.0;
-
-						vpart[i] = (gbar[i] * gbar[i]) / vbar[i];
-						taus[i] = (1.0 + epsilon) * 2;
-					}
-
-					while ((row = reader.readInstance(structure)) != null)  {
-
-						double[] gradients = new double[np];
-						double[] hessians = new double[np];
-
-						int x_C = (int) row.classValue();
-						double[] probs = predict(row);
-						SUtils.exp(probs);
-
-						computeGrad(row, probs, x_C, gradients);
-						computeHessian(row, probs, x_C, hessians);						
-
-						for (int j = 0; j < np; j++) {
-							gbar[j] = (1 - 1/taus[j]) * gbar[j] + 1/taus[j] * gradients[j];
-							vbar[j] = (1 - 1/taus[j]) * vbar[j] + 1/taus[j] * gradients[j] * gradients[j];
-							hbar[j] = (1 - 1/taus[j]) * hbar[j] + 1/taus[j] * hessians[j];
-
-							vpart[j] = 0;
-							vpart[j] = vpart[j] + (gbar[j] * gbar[j]) / vbar[j];
-
-							taus[j] = (1 - vpart[j]) * taus[j];
-							taus[j] += (1 + epsilon);
-						}
-
-						double stepSize[] = new double[np];
-						for (int j = 0; j < np; j++) {
-							stepSize[j] = vpart[j] / (hbar[j] + epsilon);
-						}
-
-						// Updated parameters
-						dParameters_.updateParameters(stepSize, gradients);
-
-						numdata++;
-
-						if (numdata % 1000 == 0) {
-							System.out.println(numdata);
-						}
-					}
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-					// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+					gradients = new double[np];
 				}
 
+				t++;
+			}
+
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
+
+	}
+
+	private double optimizeAlphaSGD(File sourceFile, Instances instancesTrain, Instances instancesTest) {
+
+		int np = dParameters_.getNp();
+
+		double[] alpha = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5};
+		double[] perf = new double[alpha.length]; 
+
+		for (int i = 0; i < alpha.length; i++) {
+
+			System.out.print(".");
+
+			dParameters_.initializeParametersWithVal(1.0);
+
+			/* Train Classifier  with alpha i */
+			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
+				Instance instance = instancesTrain.instance(ii);
+				double[] gradients = new double[np];
+
+				int x_C = (int) instance.classValue();
+				double[] probs = predict(instance);
+				SUtils.exp(probs);
+
+				computeGrad(instance, probs, x_C, gradients);
+
+				dParameters_.updateParameters(alpha[i], gradients);
+			}
+
+			/* Test Classifier  with alpha i */
+			double m_RMSE = 0;
+			double m_Error = 0;
+
+			for (int ii = 0; ii < instancesTest.numInstances(); ii++) {
+				Instance instance = instancesTrain.instance(ii);
+
+				double[] probs = new double[nc];
+				probs = distributionForInstance(instance);
+				int x_C = (int) instance.classValue();
+
+				int pred = -1;
+				double bestProb = Double.MIN_VALUE;
+				for (int y = 0; y < nc; y++) {
+					if (!Double.isNaN(probs[y])) {
+						if (probs[y] > bestProb) {
+							pred = y;
+							bestProb = probs[y];
+						}
+						m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
+					} else {
+						System.err.println("probs[ " + y + "] is NaN! oh no!");
+					}
+				}
+
+				if (pred != x_C) {
+					m_Error += 1;
+				}
+			}
+
+			perf[i] = m_RMSE;
+		}
+
+		for (int i = 0; i < alpha.length; i++) {
+			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
+		}
+
+		dParameters_.initializeParametersWithVal(0);
+
+		return alpha[SUtils.minLocationInAnArray(perf)];
+	}
+
+	private void doAdaptive(File sourceFile) throws FileNotFoundException, IOException {
+
+		System.out.println("StepSize = " + m_Eta);
+		System.out.println(" ----------------------------------- ");
+
+		ArrayList<Integer> indexList = null;
+
+		if (m_DoCrossvalidate) {
+
+			Instances instancesTrain = null;
+			Instances instancesTest = null;
+
+			Instances[] instanceList;
+			//instanceList = getTrainTestInstances(sourceFile, N);
+
+			indexList = getTrainTestIndices(N);
+			instanceList = getTrainTestInstances(sourceFile, indexList);
+
+			Collections.sort(indexList);
+
+			instancesTrain = instanceList[0];
+			instancesTest = instanceList[1];
+
+			System.out.println("Finding Alpha (adaptive), Please Wait");
+			m_Eta = optimizeAlphaAdaptive(sourceFile, instancesTrain, instancesTest);
+			System.out.println("Using m_Eta (after Cross-validation) = " + m_Eta);
+		}
+
+		System.out.print("fx_ADAPTIVE = [");
+
+		int np = dParameters_.getNp();
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		double[] gradients = new double[np];
+
+		int t = 1;
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			this.structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+
+			Instance row;
+			while ((row = reader.readInstance(structure)) != null)  {
+
+				int x_C = (int) row.classValue();
+				double[] probs = predict(row);
+				SUtils.exp(probs);
+
+				computeGrad(row, probs, x_C, gradients);
+
+				if (m_DoRegularization) {
+					//regularizeGradient(gradients);
+				}
+
+				if (t % m_BufferSize == 0) {
+					double stepSize = (m_DoRegularization) ? (m_Eta / (1 + t)) : (m_Eta / (1 + (m_Lambda * t)));
+
+					dParameters_.updateParameters(stepSize, gradients);
+
+					gradients = new double[np];
+				}
+				
+				if (t % 10000 == 0) {
+					System.out.print(t + ", ");
+				}
+
+				t++;
+			}
+
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
+
+	}
+
+	private double optimizeAlphaAdaptive(File sourceFile, Instances instancesTrain, Instances instancesTest) {
+		int np = dParameters_.getNp();
+
+		double[] alpha = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5};
+		double[] perf = new double[alpha.length]; 
+
+		for (int i = 0; i < alpha.length; i++) {
+
+			System.out.print(".");
+
+			dParameters_.initializeParametersWithVal(0);
+
+			/* Train Classifier  with alpha i */
+			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
+				Instance instance = instancesTrain.instance(ii);
+				double[] gradients = new double[np];
+
+				int x_C = (int) instance.classValue();
+				double[] probs = predict(instance);
+				SUtils.exp(probs);
+
+				computeGrad(instance, probs, x_C, gradients);
+
+				double stepSize = (m_DoRegularization) ? (alpha[i] / (1 + ii)) : (alpha[i] / (1 + (m_Lambda * ii)));
+
+				dParameters_.updateParameters(alpha[i], gradients);
+			}
+
+			/* Test Classifier  with alpha i */
+			double m_RMSE = 0;
+			double m_Error = 0;
+
+			for (int ii = 0; ii < instancesTest.numInstances(); ii++) {
+				Instance instance = instancesTrain.instance(ii);
+
+				double[] probs = new double[nc];
+				probs = distributionForInstance(instance);
+				int x_C = (int) instance.classValue();
+
+				int pred = -1;
+				double bestProb = Double.MIN_VALUE;
+				for (int y = 0; y < nc; y++) {
+					if (!Double.isNaN(probs[y])) {
+						if (probs[y] > bestProb) {
+							pred = y;
+							bestProb = probs[y];
+						}
+						m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
+					} else {
+						System.err.println("probs[ " + y + "] is NaN! oh no!");
+					}
+				}
+
+				if (pred != x_C) {
+					m_Error += 1;
+				}
+			}
+
+			perf[i] = m_RMSE;
+		}
+
+		for (int i = 0; i < alpha.length; i++) {
+			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
+		}
+
+		dParameters_.initializeParametersWithVal(1);
+
+		return alpha[SUtils.minLocationInAnArray(perf)];
+	}
+
+	private void doAdagrad(File sourceFile) throws FileNotFoundException, IOException {
+
+		System.out.println("Eta_0 = " + m_Eta);
+		System.out.println("SmoothingParameter = " + smoothingParameter);
+		System.out.println(" ----------------------------------- ");
+
+		ArrayList<Integer> indexList = null;
+
+		if (m_DoCrossvalidate) {
+
+			Instances instancesTrain = null;
+			Instances instancesTest = null;
+
+			Instances[] instanceList;
+			//instanceList = getTrainTestInstances(sourceFile, N);
+
+			indexList = getTrainTestIndices(N);
+			instanceList = getTrainTestInstances(sourceFile, indexList);
+
+			Collections.sort(indexList);
+
+			instancesTrain = instanceList[0];
+			instancesTest = instanceList[1];
+
+			System.out.println("Finding Alpha (adaptive), Please Wait");
+			m_Eta = optimizeAlphaAdagrad(sourceFile, instancesTrain, instancesTest);
+			System.out.println("Using m_Eta (after Cross-validation) = " + m_Eta);
+		}
+
+		int np = dParameters_.getNp();
+
+		double[] G = new double[np];
+
+		System.out.print("fx_ADAGRAD = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		int t = 0;
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			this.structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+
+			Instance row;
+			while ((row = reader.readInstance(structure)) != null)  {
+
+				double[] gradients = new double[np];
+
+				int x_C = (int) row.classValue();
+				double[] probs = predict(row);
+				SUtils.exp(probs);
+
+				computeGrad(row, probs, x_C, gradients);
+
+				if (m_DoRegularization) {
+					//regularizeGradient(gradients);
+				}
+
+				for (int j = 0; j < np; j++) {
+					G[j] += ((gradients[j] * gradients[j]));
+				}
+
+				double stepSize[] = new double[np];
+				for (int j = 0; j < np; j++) {
+					stepSize[j] = m_Eta / (smoothingParameter + Math.sqrt(G[j]));
+
+					if (stepSize[j] == Double.POSITIVE_INFINITY) {
+						stepSize[j] = 0.0;
+					}
+				}
+
+				dParameters_.updateParameters(stepSize, gradients);
+
+				t++;
+			}
+
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
+
+	}
+
+	private double optimizeAlphaAdagrad(File sourceFile, Instances instancesTrain, Instances instancesTest) {
+
+		int np = dParameters_.getNp();
+
+		double[] alpha = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5};
+		double[] perf = new double[alpha.length]; 
+
+		for (int i = 0; i < alpha.length; i++) {
+
+			System.out.print(".");
+
+			dParameters_.initializeParametersWithVal(0);
+			double[] G = new double[np];
+
+			/* Train Classifier  with alpha i */
+			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
+				Instance instance = instancesTrain.instance(ii);
+				double[] gradients = new double[np];
+
+				int x_C = (int) instance.classValue();
+				double[] probs = predict(instance);
+				SUtils.exp(probs);
+
+				computeGrad(instance, probs, x_C, gradients);
+
+				for (int j = 0; j < np; j++) {
+					G[j] += ((gradients[j] * gradients[j]));
+				}
+
+				double stepSize[] = new double[np];
+				for (int j = 0; j < np; j++) {
+					stepSize[j] = alpha[i] / (smoothingParameter + Math.sqrt(G[j]));
+
+					if (stepSize[j] == Double.POSITIVE_INFINITY) {
+						stepSize[j] = 0.0;
+					}
+				}
+
+				// Updated parameters
+				dParameters_.updateParameters(stepSize, gradients);
+			}
+
+			/* Test Classifier  with alpha i */
+			double m_RMSE = 0;
+			double m_Error = 0;
+
+			for (int ii = 0; ii < instancesTest.numInstances(); ii++) {
+				Instance instance = instancesTrain.instance(ii);
+
+				double[] probs = new double[nc];
+				probs = distributionForInstance(instance);
+				int x_C = (int) instance.classValue();
+
+				int pred = -1;
+				double bestProb = Double.MIN_VALUE;
+				for (int y = 0; y < nc; y++) {
+					if (!Double.isNaN(probs[y])) {
+						if (probs[y] > bestProb) {
+							pred = y;
+							bestProb = probs[y];
+						}
+						m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
+					} else {
+						System.err.println("probs[ " + y + "] is NaN! oh no!");
+					}
+				}
+
+				if (pred != x_C) {
+					m_Error += 1;
+				}
+			}
+
+			perf[i] = m_RMSE;
+		}
+
+		for (int i = 0; i < alpha.length; i++) {
+			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
+		}
+
+		dParameters_.initializeParametersWithVal(1);
+
+		return alpha[SUtils.minLocationInAnArray(perf)];
+	}
+
+	private void doAdadelta(File sourceFile) throws FileNotFoundException, IOException {
+
+		double rho = m_Eta;
+
+		System.out.println("rho = " + m_Eta);
+		System.out.println("SmoothingParameter = " + smoothingParameter);
+		System.out.println(" ----------------------------------- ");
+
+		ArrayList<Integer> indexList = null;
+
+		if (m_DoCrossvalidate) {
+
+			Instances instancesTrain = null;
+			Instances instancesTest = null;
+
+			Instances[] instanceList;
+			//instanceList = getTrainTestInstances(sourceFile, N);
+
+			indexList = getTrainTestIndices(N);
+			instanceList = getTrainTestInstances(sourceFile, indexList);
+
+			Collections.sort(indexList);
+
+			instancesTrain = instanceList[0];
+			instancesTest = instanceList[1];
+
+			System.out.println("Finding Alpha (adaptive), Please Wait");
+			m_Eta = optimizeAlphaAdadelta(sourceFile, instancesTrain, instancesTest);
+			System.out.println("Using m_Eta (after Cross-validation) = " + m_Eta);
+		}
+
+		int np = dParameters_.getNp();
+
+		double[] G = new double[np];
+		double[] D = new double[np];
+
+		System.out.print("fx_ADADELTA = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		int t = 0;
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			this.structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+
+			Instance row;
+			while ((row = reader.readInstance(structure)) != null)  {
+
+				double[] gradients = new double[np];
+
+				int x_C = (int) row.classValue();
+				double[] probs = predict(row);
+				SUtils.exp(probs);
+
+				computeGrad(row, probs, x_C, gradients);
+
+				if (m_DoRegularization) {
+					//regularizeGradient(gradients);
+				}
+
+				double stepSize[] = new double[np];
+
+				for (int i = 0; i < np; i++) {
+					G[i] = (rho * G[i]) + ((1 - rho) * (gradients[i] * gradients[i]));
+
+					stepSize[i] = - ((Math.sqrt(D[i] + smoothingParameter)) / (Math.sqrt(G[i] + smoothingParameter))) * gradients[i];
+
+					D[i] = (rho * D[i]) + ((1.0 - rho) * (stepSize[i] * stepSize[i]));
+				}
+
+				dParameters_.updateParameters(stepSize, gradients);
+
+				t++;
+			}
+
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
+
+	}
+
+	private double optimizeAlphaAdadelta(File sourceFile, Instances instancesTrain, Instances instancesTest) {
+
+		int np = dParameters_.getNp();
+
+		double[] alpha = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5};
+		double[] perf = new double[alpha.length]; 
+
+		for (int i = 0; i < alpha.length; i++) {
+
+			double rho = alpha[i];
+
+			System.out.print(".");
+
+			dParameters_.initializeParametersWithVal(0);
+			double[] G = new double[np];
+			double[] D = new double[np];
+
+			/* Train Classifier  with alpha i */
+			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
+				Instance instance = instancesTrain.instance(ii);
+				double[] gradients = new double[np];
+
+				int x_C = (int) instance.classValue();
+				double[] probs = predict(instance);
+				SUtils.exp(probs);
+
+				computeGrad(instance, probs, x_C, gradients);
+
+				double stepSize[] = new double[np];
+				for (int j = 0; j < np; j++) {
+					G[j] = (rho * G[j]) + ((1 - rho) * (gradients[j] * gradients[j]));
+
+					stepSize[j] = - ((Math.sqrt(D[j] + smoothingParameter)) / (Math.sqrt(G[j] + smoothingParameter))) * gradients[j];
+
+					D[j] = (rho * D[j]) + ((1.0 - rho) * (stepSize[j] * stepSize[j]));
+				}
+
+				// Updated parameters
+				dParameters_.updateParameters(stepSize, gradients);
+			}
+
+			/* Test Classifier  with alpha i */
+			double m_RMSE = 0;
+			double m_Error = 0;
+
+			for (int ii = 0; ii < instancesTest.numInstances(); ii++) {
+				Instance instance = instancesTrain.instance(ii);
+
+				double[] probs = new double[nc];
+				probs = distributionForInstance(instance);
+				int x_C = (int) instance.classValue();
+
+				int pred = -1;
+				double bestProb = Double.MIN_VALUE;
+				for (int y = 0; y < nc; y++) {
+					if (!Double.isNaN(probs[y])) {
+						if (probs[y] > bestProb) {
+							pred = y;
+							bestProb = probs[y];
+						}
+						m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
+					} else {
+						System.err.println("probs[ " + y + "] is NaN! oh no!");
+					}
+				}
+
+				if (pred != x_C) {
+					m_Error += 1;
+				}
+			}
+
+			perf[i] = m_RMSE;
+		}
+
+		for (int i = 0; i < alpha.length; i++) {
+			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
+		}
+
+		dParameters_.initializeParametersWithVal(1);
+
+		return alpha[SUtils.minLocationInAnArray(perf)];
+
+	}
+
+
+
+	/*
+	 * -------------------------------------------------------------------------------------
+	 * 5 Important functions
+	 * EvaulateFunction
+	 * Predict
+	 * ComputeGradient
+	 * ComputeHessian
+	 * distributionForInstance
+	 * -------------------------------------------------------------------------------------
+	 */
+
+	public double evaluateFunction(File sourceFile) throws IOException {
+		double f = 0;
+		double mLogNC = - Math.log(nc);
+
+		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+		this.structure = reader.getStructure();
+		structure.setClassIndex(structure.numAttributes() - 1);
+
+		Instance row;
+		while ((row = reader.readInstance(structure)) != null)  {
+
+			int x_C = (int) row.classValue();
+			double[] probs = predict(row);
+
+			f += mLogNC - probs[x_C];
+		}
+
+		return f;
+	}
+
+	private double[] predict(Instance inst) {
+		double[] probs = new double[nc];
+
+		if (m_DoWANBIAC) {
+			for (int c = 0; c < nc; c++) {
+				probs[c] = dParameters_.getParameters()[c] * dParameters_.getClassProbabilities()[c];
+
+
+				for (int u = 0; u < n; u++) {
+					double uval = inst.value(m_Order[u]);
+
+					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+					probs[c] += wd.getXYParameter((int)uval, c) * wd.getXYProbability((int)uval, c);
+				}
+			}
+		} else {
+			for (int c = 0; c < nc; c++) {
+				probs[c] = dParameters_.getParameters()[c];
+
+
+				for (int u = 0; u < n; u++) {
+					double uval = inst.value(m_Order[u]);
+
+					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+					probs[c] += wd.getXYParameter((int)uval, c);
+				}
+			}
+		}
+
+		SUtils.normalizeInLogDomain(probs);
+		return probs;
+	}
+
+	private void computeGrad(Instance inst, double[] probs, int x_C, double[] gradients) {
+
+		if (m_DoWANBIAC) {
+			for (int c = 0; c < nc; c++) {
+				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
+			}
+
+			for (int u = 0; u < n; u++) {
+				double uval = inst.value(m_Order[u]);
+
+				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+				for (int c = 0; c < nc; c++) {
+					int posp = wd.getXYIndex((int)uval, c);
+
+					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c);
+				}
+			}
+		} else {
+			for (int c = 0; c < nc; c++) {
+				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+			}
+
+			for (int u = 0; u < n; u++) {
+				double uval = inst.value(m_Order[u]);
+
+				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+				for (int c = 0; c < nc; c++) {
+					int posp = wd.getXYIndex((int)uval, c);
+
+					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+				}
+			}
+		}
+
+	}
+
+	private void computeHessian(Instance inst, double[] probs, int x_C, double[] hessians) {
+
+		if (m_DoWANBIAC) {
+
+			double[] d =new double[nc];
+
+			for (int c = 0;  c < nc; c++) {
+				d[c] =  (1 - probs[c]) * probs[c];
+			}
+
+			for (int c = 0; c < nc; c++) {
+				hessians[c] += d[c] * dParameters_.getClassProbabilities()[c];
+			}
+
+			for (int u = 0; u < n; u++) {
+				double uval = inst.value(m_Order[u]);
+
+				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+				for (int c = 0; c < nc; c++) {
+
+					int posp = wd.getXYIndex((int)uval, c);
+
+					hessians[posp] += (d[c] * wd.getXYProbability((int)uval, c) * wd.getXYProbability((int)uval, c)); 
+				}
+			}
+
+		} else {
+
+			double[] d =new double[nc];
+
+			for (int c = 0;  c < nc; c++) {
+				d[c] =  (1 - probs[c]) * probs[c];
+			}
+
+			for (int c = 0; c < nc; c++) {
+				hessians[c] += d[c];
+			}
+
+			for (int u = 0; u < n; u++) {
+				double uval = inst.value(m_Order[u]);
+
+				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+				for (int c = 0; c < nc; c++) {
+
+					int posp = wd.getXYIndex((int)uval, c);
+
+					hessians[posp] += d[c]; 
+				}
+			}
+		}
+
+	}
+
+	public double[] distributionForInstance(Instance inst) {
+
+		double[] probs = new double[nc];
+
+		if (m_DoWANBIAC) {
+
+			for (int c = 0; c < nc; c++) {
+				probs[c] = dParameters_.getParameters()[c] * dParameters_.getClassProbabilities()[c];
+
+				for (int u = 0; u < n; u++) {
+					double uval = inst.value(m_Order[u]);
+
+					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+					probs[c] += wd.getXYParameter((int)uval, c) * wd.getXYProbability((int)uval, c);
+				}
+			}
+
+		} else {
+
+			for (int c = 0; c < nc; c++) {
+				probs[c] = dParameters_.getParameters()[c];
+
+				for (int u = 0; u < n; u++) {
+					double uval = inst.value(m_Order[u]);
+
+					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+					probs[c] += wd.getXYParameter((int)uval, c);
+				}
 			}
 
 		}
 
-		System.out.println("Finish training");
+		SUtils.normalizeInLogDomain(probs);
+		SUtils.exp(probs);
+		return probs;
 	}
+
+	/*
+	 * -------------------------------------------------------------------------------------
+	 * Cross-validation functions
+	 * -------------------------------------------------------------------------------------
+	 */
 
 	private ArrayList<Integer> getTrainTestIndices(int N) {
 
@@ -622,334 +1294,11 @@ public class fuplaOOC {
 		return instancesList;
 	}
 
-	private double optimizeAlphaADAGRAD(File sourceFile, Instances instancesTrain, Instances instancesTest, double smoothingParameter) {
-
-		Instance row;
-		int np = dParameters_.getNp();
-
-		double[] alpha = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5};
-		double[] perf = new double[alpha.length]; 
-
-		for (int i = 0; i < alpha.length; i++) {
-
-			System.out.print(".");
-
-			dParameters_.initializeParametersWithVal(1.0);
-			double[] G = new double[np];
-
-			/* Train Classifier  with alpha i */
-			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
-				Instance instance = instancesTrain.instance(ii);
-				double[] gradients = new double[np];
-
-				int x_C = (int) instance.classValue();
-				double[] probs = predict(instance);
-				SUtils.exp(probs);
-
-				computeGrad(instance, probs, x_C, gradients);
-
-				for (int j = 0; j < np; j++) {
-					G[j] += ((gradients[j] * gradients[j]));
-				}
-
-				double stepSize[] = new double[np];
-				for (int j = 0; j < np; j++) {
-					stepSize[j] = alpha[i] / (smoothingParameter + Math.sqrt(G[j]));
-
-					if (stepSize[j] == Double.POSITIVE_INFINITY) {
-						stepSize[j] = 0.0;
-					}
-				}
-
-				// Updated parameters
-				dParameters_.updateParameters(stepSize, gradients);
-			}
-
-			/* Test Classifier  with alpha i */
-			double m_RMSE = 0;
-			double m_Error = 0;
-
-			for (int ii = 0; ii < instancesTest.numInstances(); ii++) {
-				Instance instance = instancesTrain.instance(ii);
-
-				double[] probs = new double[nc];
-				probs = distributionForInstance(instance);
-				int x_C = (int) instance.classValue();
-
-				int pred = -1;
-				double bestProb = Double.MIN_VALUE;
-				for (int y = 0; y < nc; y++) {
-					if (!Double.isNaN(probs[y])) {
-						if (probs[y] > bestProb) {
-							pred = y;
-							bestProb = probs[y];
-						}
-						m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
-					} else {
-						System.err.println("probs[ " + y + "] is NaN! oh no!");
-					}
-				}
-
-				if (pred != x_C) {
-					m_Error += 1;
-				}
-			}
-
-			perf[i] = m_RMSE;
-		}
-
-		for (int i = 0; i < alpha.length; i++) {
-			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
-		}
-
-		dParameters_.initializeParametersWithVal(1);
-
-		return alpha[SUtils.minLocationInAnArray(perf)];
-	}
-
-	private double optimizeAlphaSGD(File sourceFile, Instances instancesTrain, Instances instancesTest) {
-
-		int np = dParameters_.getNp();
-
-		double[] alpha = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5};
-		double[] perf = new double[alpha.length]; 
-
-		for (int i = 0; i < alpha.length; i++) {
-
-			System.out.print(".");
-
-			dParameters_.initializeParametersWithVal(1.0);
-
-			/* Train Classifier  with alpha i */
-			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
-				Instance instance = instancesTrain.instance(ii);
-				double[] gradients = new double[np];
-
-				int x_C = (int) instance.classValue();
-				double[] probs = predict(instance);
-				SUtils.exp(probs);
-
-				computeGrad(instance, probs, x_C, gradients);
-
-				dParameters_.updateParameters(alpha[i], gradients);
-			}
-
-			/* Test Classifier  with alpha i */
-			double m_RMSE = 0;
-			double m_Error = 0;
-
-			for (int ii = 0; ii < instancesTest.numInstances(); ii++) {
-				Instance instance = instancesTrain.instance(ii);
-
-				double[] probs = new double[nc];
-				probs = distributionForInstance(instance);
-				int x_C = (int) instance.classValue();
-
-				int pred = -1;
-				double bestProb = Double.MIN_VALUE;
-				for (int y = 0; y < nc; y++) {
-					if (!Double.isNaN(probs[y])) {
-						if (probs[y] > bestProb) {
-							pred = y;
-							bestProb = probs[y];
-						}
-						m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
-					} else {
-						System.err.println("probs[ " + y + "] is NaN! oh no!");
-					}
-				}
-
-				if (pred != x_C) {
-					m_Error += 1;
-				}
-			}
-
-			perf[i] = m_RMSE;
-		}
-
-		for (int i = 0; i < alpha.length; i++) {
-			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
-		}
-
-		dParameters_.initializeParametersWithVal(1);
-
-		return alpha[SUtils.minLocationInAnArray(perf)];
-	}
-
-	private double[] predict(Instance inst) {
-		double[] probs = new double[nc];
-		
-		if (m_DoWANBIAC) {
-			for (int c = 0; c < nc; c++) {
-				probs[c] = dParameters_.getParameters()[c] * dParameters_.getClassProbabilities()[c];
-
-
-				for (int u = 0; u < n; u++) {
-					double uval = inst.value(m_Order[u]);
-
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-					probs[c] += wd.getXYParameter((int)uval, c) * wd.getXYProbability((int)uval, c);
-				}
-			}
-		} else {
-			for (int c = 0; c < nc; c++) {
-				probs[c] = dParameters_.getParameters()[c];
-
-
-				for (int u = 0; u < n; u++) {
-					double uval = inst.value(m_Order[u]);
-
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-					probs[c] += wd.getXYParameter((int)uval, c);
-				}
-			}
-		}
-
-		SUtils.normalizeInLogDomain(probs);
-		return probs;
-	}
-
-	private void computeGrad(Instance inst, double[] probs, int x_C, double[] gradients) {
-		
-		if (m_DoWANBIAC) {
-			for (int c = 0; c < nc; c++) {
-				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
-			}
-
-			for (int u = 0; u < n; u++) {
-				double uval = inst.value(m_Order[u]);
-
-				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-				for (int c = 0; c < nc; c++) {
-					int posp = wd.getXYIndex((int)uval, c);
-
-					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c);
-				}
-			}
-		} else {
-			for (int c = 0; c < nc; c++) {
-				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
-			}
-
-			for (int u = 0; u < n; u++) {
-				double uval = inst.value(m_Order[u]);
-
-				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-				for (int c = 0; c < nc; c++) {
-					int posp = wd.getXYIndex((int)uval, c);
-
-					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
-				}
-			}
-		}
-	
-	}
-
-	private void computeHessian(Instance inst, double[] probs, int x_C, double[] hessians) {
-		
-		if (m_DoWANBIAC) {
-			
-			double[] d =new double[nc];
-
-			for (int c = 0;  c < nc; c++) {
-				d[c] =  (1 - probs[c]) * probs[c];
-			}
-
-			for (int c = 0; c < nc; c++) {
-				hessians[c] += d[c] * dParameters_.getClassProbabilities()[c];
-			}
-
-			for (int u = 0; u < n; u++) {
-				double uval = inst.value(m_Order[u]);
-
-				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-				for (int c = 0; c < nc; c++) {
-
-					int posp = wd.getXYIndex((int)uval, c);
-
-					hessians[posp] += (d[c] * wd.getXYProbability((int)uval, c) * wd.getXYProbability((int)uval, c)); 
-				}
-			}
-			
-		} else {
-			
-			double[] d =new double[nc];
-
-			for (int c = 0;  c < nc; c++) {
-				d[c] =  (1 - probs[c]) * probs[c];
-			}
-
-			for (int c = 0; c < nc; c++) {
-				hessians[c] += d[c];
-			}
-
-			for (int u = 0; u < n; u++) {
-				double uval = inst.value(m_Order[u]);
-
-				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-				for (int c = 0; c < nc; c++) {
-
-					int posp = wd.getXYIndex((int)uval, c);
-
-					hessians[posp] += d[c]; 
-				}
-			}
-		}
-		
-	}
-
-	public double[] distributionForInstance(Instance inst) {
-		
-		double[] probs = new double[nc];
-		
-		if (m_DoWANBIAC) {
-
-			for (int c = 0; c < nc; c++) {
-				probs[c] = dParameters_.getParameters()[c] * dParameters_.getClassProbabilities()[c];
-
-				for (int u = 0; u < n; u++) {
-					double uval = inst.value(m_Order[u]);
-
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-					probs[c] += wd.getXYParameter((int)uval, c) * wd.getXYProbability((int)uval, c);
-				}
-			}
-			
-		} else {
-			
-			for (int c = 0; c < nc; c++) {
-				probs[c] = dParameters_.getParameters()[c];
-
-				for (int u = 0; u < n; u++) {
-					double uval = inst.value(m_Order[u]);
-
-					wdBayesNode wd = dParameters_.getBayesNode(inst, u);
-
-					probs[c] += wd.getXYParameter((int)uval, c);
-				}
-			}
-			
-		}
-
-		SUtils.normalizeInLogDomain(probs);
-		SUtils.exp(probs);
-		return probs;
-	}
-
-	public int getSelectedK() {
-		return m_BestK_;
-	}
-
-	public int getSelectedAttributes() {
-		return m_BestattIt;
-	}
+	/*
+	 * -------------------------------------------------------------------------------------
+	 * Option Setters
+	 * -------------------------------------------------------------------------------------
+	 */
 
 	public void setOptions(String[] options) throws Exception {
 		m_MVerb = Utils.getFlag('V', options);
@@ -961,11 +1310,17 @@ public class fuplaOOC {
 
 		m_DoSKDB = Utils.getFlag('S', options);
 		m_DoDiscriminative = Utils.getFlag('D', options);
-		
+
 		m_DoWANBIAC = Utils.getFlag('W', options); 
 
 		Utils.checkForRemainingOptions(options);
 	}
+
+	/*
+	 * -------------------------------------------------------------------------------------
+	 * Getters and Setters
+	 * -------------------------------------------------------------------------------------
+	 */
 
 	public int getNInstances() {
 		return N;
@@ -981,6 +1336,14 @@ public class fuplaOOC {
 
 	public wdBayesParametersTree getdParameters_() {
 		return dParameters_;
+	}
+
+	public int getSelectedK() {
+		return m_BestK_;
+	}
+
+	public int getSelectedAttributes() {
+		return m_BestattIt;
 	}
 
 	public int[] getM_Order() {
@@ -1027,10 +1390,6 @@ public class fuplaOOC {
 		return n;
 	}
 
-	public void setRandomGenerator(RandomGenerator rg) {
-		this.rg = rg;
-	}
-
 	public String getM_O() {
 		return m_O;
 	}
@@ -1038,7 +1397,55 @@ public class fuplaOOC {
 	public void setM_O(String m_O) {
 		this.m_O = m_O;
 	}
-	
+
+	public boolean isM_DoRegularization() {
+		return m_DoRegularization;
+	}
+
+	public void setM_DoRegularization(boolean m_DoRegularization) {
+		this.m_DoRegularization = m_DoRegularization;
+	}
+
+	public boolean isM_DoCrossvalidate() {
+		return m_DoCrossvalidate;
+	}
+
+	public  void setM_DoCrossvalidate(boolean m_DoCrossvalidate) {
+		this.m_DoCrossvalidate = m_DoCrossvalidate;
+	}
+
+	public double getM_Lambda() {
+		return m_Lambda;
+	}
+
+	public void setM_Lambda(double m_Lambda) {
+		this.m_Lambda = m_Lambda;
+	}
+
+	public double getM_Eta() {
+		return m_Eta;
+	}
+
+	public void setM_Eta(double m_Eta) {
+		this.m_Eta = m_Eta;
+	}
+
+	public int getM_NumIterations() {
+		return m_NumIterations;
+	}
+
+	public int getM_BufferSize() {
+		return m_BufferSize;
+	}
+
+	public void setM_BufferSize(int m_BufferSize) {
+		this.m_BufferSize = m_BufferSize;
+	}
+
+	public void setM_NumIterations(int m_NumIterations) {
+		this.m_NumIterations = m_NumIterations;
+	}
+
 	public boolean isM_DoWANBIAC() {
 		return m_DoWANBIAC;
 	}
@@ -1046,6 +1453,5 @@ public class fuplaOOC {
 	public void setM_DoWANBIAC(boolean m_DoWANBIAC) {
 		this.m_DoWANBIAC = m_DoWANBIAC;
 	}
-
 
 }

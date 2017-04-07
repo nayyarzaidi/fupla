@@ -24,18 +24,24 @@ public class TwoFoldXValOOCFupla {
 
 	private static String data = "";
 
-	private static boolean m_MVerb = false; 					// -V
-	private static int m_KDB = 1;										// -K
+	private static boolean m_MVerb = false; 					      // -V
 
-	private static boolean m_DoSKDB = false;				// -S
-	private static boolean m_DoDiscriminative = false; 	// -D
+	private static int m_KDB = 1;										       // -K
+	private static boolean m_DoSKDB = false;				      // -S
+	private static boolean m_DoDiscriminative = false; 	      // -D
 
-	private static String m_O = "adagrad";                       // -O
+	private static String m_O = "adagrad";                             // -O
+	private static boolean m_DoRegularization = false;		  // -R
+	private static double m_Lambda = 0.001;						  // -L
+	private static double m_Eta = 0.01;                                 // -E
+	private static boolean m_DoCrossvalidate = false;          // -C
+
+	private static int m_NumIterations = 1;                            // -I
+	private static int m_BufferSize = 1;                                  // -B
 
 	private static boolean m_DoWANBIAC = false;               // -W
 
-	private static Instances instances = null;
-	private static int m_nExp = 5;
+	private static int m_nExp = 5;                                         // -X
 
 	public static final int BUFFER_SIZE = 10*1024*1024; 	//100MB
 
@@ -84,9 +90,6 @@ public class TwoFoldXValOOCFupla {
 			lineNo++;
 		}
 
-		//ArrayList<ArrayList<Double>> instanceProbs = new ArrayList<ArrayList<Double>>();
-		//HashMap instancesProbs = new HashMap();
-
 		double[][] instanceProbs = new double[lineNo][nc];
 
 		for (int exp = 0; exp < m_nExp; exp++) {
@@ -102,19 +105,26 @@ public class TwoFoldXValOOCFupla {
 			// Train on Fold 0
 			// ---------------------------------------------------------
 
-			//fuplaOOC learner = new fuplaOOC();
+			fuplaOOC learner = new fuplaOOC();
 			//fuplaOOCReg learner = new fuplaOOCReg();
-			hfuplaOOC learner = new hfuplaOOC();
+			//hfuplaOOC learner = new hfuplaOOC();
 
 			learner.setM_MVerb(m_MVerb);
 			learner.setM_KDB(m_KDB);
 			learner.setM_DoSKDB(m_DoSKDB);
 			learner.setM_DoDiscriminative(m_DoDiscriminative);
-			learner.setRandomGenerator(rg);
-			learner.setM_O(m_O);
-			if (m_DoWANBIAC) {
-				learner.setM_DoWANBIAC(m_DoWANBIAC);
+			if (m_DoDiscriminative) {
+				learner.setM_O(m_O);
+				learner.setM_Eta(m_Eta);
+				learner.setM_DoRegularization(m_DoRegularization);
+				if (m_DoRegularization) {
+					learner.setM_Lambda(m_Lambda);
+				}
+				learner.setM_NumIterations(m_NumIterations);
+				learner.setM_BufferSize(m_BufferSize);   
+				learner.setM_DoCrossvalidate(m_DoCrossvalidate);
 			}
+			learner.setM_DoWANBIAC(m_DoWANBIAC);
 
 			// creating tempFile for train0
 			File trainFile = createTrainTmpFile(sourceFile, structure, test0Indexes);
@@ -167,11 +177,6 @@ public class TwoFoldXValOOCFupla {
 					thisNTest++;
 					NTest++;
 
-					ArrayList<Double> classprobs = new ArrayList();
-					for (int y = 0; y < nc; y++) {
-						classprobs.add(probs[y]);
-					}
-
 					instanceProbs[lineNo][pred]++;
 				}
 				lineNo++;
@@ -192,19 +197,26 @@ public class TwoFoldXValOOCFupla {
 			// ---------------------------------------------------------
 			// Train on Fold 1
 			// ---------------------------------------------------------
-			//learner = new fuplaOOC();
+			learner = new fuplaOOC();
 			//learner = new fuplaOOCReg();
-			learner = new hfuplaOOC();
+			//learner = new hfuplaOOC();
 
 			learner.setM_MVerb(m_MVerb);
 			learner.setM_KDB(m_KDB);
 			learner.setM_DoSKDB(m_DoSKDB);
 			learner.setM_DoDiscriminative(m_DoDiscriminative);
-			learner.setRandomGenerator(rg);
-			learner.setM_O(m_O);
-			if (m_DoWANBIAC) {
-				learner.setM_DoWANBIAC(m_DoWANBIAC);
+			if (m_DoDiscriminative) {
+				learner.setM_O(m_O);
+				learner.setM_Eta(m_Eta);
+				learner.setM_DoRegularization(m_DoRegularization);
+				if (m_DoRegularization) {
+					learner.setM_Lambda(m_Lambda);
+				}
+				learner.setM_NumIterations(m_NumIterations);
+				learner.setM_BufferSize(m_BufferSize);   
+				learner.setM_DoCrossvalidate(m_DoCrossvalidate);
 			}
+			learner.setM_DoWANBIAC(m_DoWANBIAC);
 
 			// creating tempFile for train0
 			trainFile = createTrainTmpFile(sourceFile, structure, test1Indexes);
@@ -335,6 +347,32 @@ public class TwoFoldXValOOCFupla {
 		if (Soutput.length() != 0) {
 			m_O = Soutput;
 		}
+
+		String strI = Utils.getOption('I', options);
+		if (strI.length() != 0) {
+			m_NumIterations = Integer.valueOf(strI);
+		}
+
+		String strB = Utils.getOption('B', options);
+		if (strB.length() != 0) {
+			m_BufferSize = Integer.valueOf(strB);
+		}
+
+		m_DoRegularization = Utils.getFlag('R', options);
+
+		if (m_DoRegularization) {
+			String strL = Utils.getOption('L', options);
+			if (strL.length() != 0) {
+				m_Lambda = Double.valueOf(strL);
+			}
+		}
+
+		String strE = Utils.getOption('E', options);
+		if (strE.length() != 0) {
+			m_Eta = Double.valueOf(strE);
+		}
+
+		m_DoCrossvalidate =  Utils.getFlag('C', options);
 
 		m_DoWANBIAC = Utils.getFlag('W', options); 
 
