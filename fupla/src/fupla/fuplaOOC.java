@@ -751,7 +751,7 @@ public class fuplaOOC {
 		int np = dParameters_.getNp();
 
 		double[] G = new double[np];
-		double[] gradients = new double[np];
+//		double[] gradients = new double[np];
 
 		System.out.print("fx_ADAGRAD = [");
 
@@ -768,13 +768,14 @@ public class fuplaOOC {
 			Instance row;
 			while ((row = reader.readInstance(structure)) != null)  {
 
-				Arrays.fill(gradients, 0);
+//				Arrays.fill(gradients, 0);
 
 				int x_C = (int) row.classValue();
 				double[] probs = predict(row);
 				SUtils.exp(probs);
 
-				computeGradAndUpdateParameters(row, probs, x_C, gradients, G);
+//				computeGradAndUpdateParameters(row, probs, x_C, gradients, G);
+				computeGradAndUpdateParameters(row, probs, x_C, G);
 
 				t++;
 			}
@@ -1156,20 +1157,22 @@ public class fuplaOOC {
 
 	}
 	
-	private void computeGradAndUpdateParameters(Instance inst, double[] probs, int x_C, double[] gradients, double[] G) {
+	private void computeGradAndUpdateParameters(Instance inst, double[] probs, int x_C, double[] G) {
 		
 		if (m_DoWANBIAC) {
 			for (int c = 0; c < nc; c++) {
-				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
+				double g = (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
+//				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
 				
-				G[c] += (gradients[c] * gradients[c]);
+//				G[c] += (gradients[c] * gradients[c]);
+				G[c] += (g*g);
 				
 				double stepSize = m_Eta / (smoothingParameter + Math.sqrt(G[c]));
 				if (stepSize == Double.POSITIVE_INFINITY) {
 					stepSize = 0.0;
 				}
 				
-				dParameters_.getParameters()[c] -= stepSize * gradients[c];
+				dParameters_.getParameters()[c] -= stepSize * g;
 			}
 
 			for (int u = 0; u < n; u++) {
@@ -1179,17 +1182,18 @@ public class fuplaOOC {
 
 				for (int c = 0; c < nc; c++) {
 					int posp = wd.getXYIndex((int)uval, c);
-
-					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c);
+					double g =  (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c);
+//					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c);
 					
-					G[posp] += (gradients[posp] * gradients[posp]);
+//					G[posp] += (gradients[posp] * gradients[posp]);
+					G[posp] += (g*g);
 					
 					double stepSize = m_Eta / (smoothingParameter + Math.sqrt(G[posp]));
 					if (stepSize == Double.POSITIVE_INFINITY) {
 						stepSize = 0.0;
 					}
 					
-					double newval = wd.getXYParameter(uval, c) - (stepSize * gradients[posp]);
+					double newval = wd.getXYParameter(uval, c) - (stepSize * g);
 					wd.setXYParameter(uval, c, newval);
 
 					dParameters_.getParameters()[posp] = newval;
@@ -1197,16 +1201,17 @@ public class fuplaOOC {
 			}
 		} else {
 			for (int c = 0; c < nc; c++) {
-				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+//				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+				double g = (-1) * (SUtils.ind(c, x_C) - probs[c]);
 				
-				G[c] += (gradients[c] * gradients[c]);
+				G[c] += (g*g);
 				
 				double stepSize = m_Eta / (smoothingParameter + Math.sqrt(G[c]));
 				if (stepSize == Double.POSITIVE_INFINITY) {
 					stepSize = 0.0;
 				}
 				
-				dParameters_.getParameters()[c] -= stepSize * gradients[c];
+				dParameters_.getParameters()[c] -= stepSize * g;
 			}
 
 			for (int u = 0; u < n; u++) {
@@ -1217,16 +1222,17 @@ public class fuplaOOC {
 				for (int c = 0; c < nc; c++) {
 					int posp = wd.getXYIndex((int)uval, c);
 
-					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+//					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+					double g = (-1) * (SUtils.ind(c, x_C) - probs[c]);
 					
-					G[posp] += (gradients[posp] * gradients[posp]);
+					G[posp] += (g*g);
 					
 					double stepSize = m_Eta / (smoothingParameter + Math.sqrt(G[posp]));
 					if (stepSize == Double.POSITIVE_INFINITY) {
 						stepSize = 0.0;
 					}
 					
-					double newval = wd.getXYParameter(uval, c) - (stepSize * gradients[posp]);
+					double newval = wd.getXYParameter(uval, c) - (stepSize * g);
 					wd.setXYParameter(uval, c, newval);
 
 					dParameters_.getParameters()[posp] = newval;
