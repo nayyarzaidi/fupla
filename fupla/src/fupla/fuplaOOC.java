@@ -98,7 +98,7 @@ public class fuplaOOC {
 		} else {
 			System.out.println(" ----------------------------------- ");
 		}
-		
+
 		/*
 		 *  ------------------------------------------------------
 		 * Pass No. 1
@@ -301,7 +301,8 @@ public class fuplaOOC {
 
 			} else if (m_O.equalsIgnoreCase("adagrad")) {
 
-				doAdagrad(sourceFile);
+				//doAdagrad(sourceFile);
+				doAdagradOpt(sourceFile);
 
 			} else if (m_O.equalsIgnoreCase("adadelta")) {
 
@@ -325,7 +326,6 @@ public class fuplaOOC {
 	private void doSGD(File sourceFile) throws FileNotFoundException, IOException {
 
 		System.out.println("StepSize = " + m_Eta);
-		System.out.println("BufferSize = " + m_BufferSize);
 		System.out.println(" ----------------------------------- ");
 
 		ArrayList<Integer> indexList = null;
@@ -348,7 +348,7 @@ public class fuplaOOC {
 
 			System.out.println("Finding Alpha (sgd), Please Wait");
 			m_Eta = optimizeAlphaSGD(sourceFile, instancesTrain, instancesTest);
-			System.out.println("Using m_Eta (after Cross-validation) = " + m_Eta);
+			System.out.println("Using m_Eta (after Cross-validation) = ************ " + m_Eta + " ************");
 		}
 
 		System.out.print("fx_SGD = [");
@@ -360,8 +360,6 @@ public class fuplaOOC {
 
 		double[] gradients = new double[np];
 
-		int t = 1;
-
 		for (int iter = 0; iter < m_NumIterations; iter++) {
 
 			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
@@ -369,11 +367,16 @@ public class fuplaOOC {
 			structure.setClassIndex(structure.numAttributes() - 1);
 
 			Instance row;
+			int t = 0;
 			while ((row = reader.readInstance(structure)) != null)  {
+				
+				Arrays.fill(gradients, 0);
 
-				if (Collections.binarySearch(indexList, t) >= 0) {
-					continue;
-				}
+//				if (m_DoCrossvalidate) {
+//					if (Collections.binarySearch(indexList, t) >= 0) {
+//						continue;
+//					}
+//				}
 
 				int x_C = (int) row.classValue();
 				double[] probs = predict(row);
@@ -385,14 +388,9 @@ public class fuplaOOC {
 					//regularizeGradient(gradients);
 				}
 
-				if (t % m_BufferSize == 0) {
-					double stepSize = m_Eta;
-
-					dParameters_.updateParameters(stepSize, gradients);
-
-					gradients = new double[np];
-				}
-
+				double stepSize = m_Eta;
+				updateParameters(row, probs, x_C, stepSize, gradients);
+				
 				t++;
 			}
 
@@ -400,7 +398,6 @@ public class fuplaOOC {
 			System.out.print(f + ", ");
 		}
 		System.out.println("];");
-		System.out.println("Did: " + t + " updates.");
 
 	}
 
@@ -415,7 +412,7 @@ public class fuplaOOC {
 
 			System.out.print(".");
 
-			dParameters_.initializeParametersWithVal(1.0);
+			dParameters_.initializeParametersWithVal(0);
 
 			/* Train Classifier  with alpha i */
 			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
@@ -428,7 +425,8 @@ public class fuplaOOC {
 
 				computeGrad(instance, probs, x_C, gradients);
 
-				dParameters_.updateParameters(alpha[i], gradients);
+				//dParameters_.updateParameters(alpha[i], gradients);
+				updateParameters(instance, probs, x_C, alpha[i], gradients);
 			}
 
 			/* Test Classifier  with alpha i */
@@ -520,6 +518,12 @@ public class fuplaOOC {
 			Instance row;
 			while ((row = reader.readInstance(structure)) != null)  {
 
+				if (m_DoCrossvalidate) {
+					if (Collections.binarySearch(indexList, t) >= 0) {
+						continue;
+					}
+				}
+
 				int x_C = (int) row.classValue();
 				double[] probs = predict(row);
 				SUtils.exp(probs);
@@ -533,14 +537,15 @@ public class fuplaOOC {
 				if (t % m_BufferSize == 0) {
 					double stepSize = (m_DoRegularization) ? (m_Eta / (1 + t)) : (m_Eta / (1 + (m_Lambda * t)));
 
-					dParameters_.updateParameters(stepSize, gradients);
+					//dParameters_.updateParameters(stepSize, gradients);
+					updateParameters(row, probs, x_C, stepSize, gradients);
 
-					gradients = new double[np];
+					Arrays.fill(gradients, 0);
 				}
-				
-				if (t % 10000 == 0) {
-					System.out.print(t + ", ");
-				}
+
+				//if (t % 10000 == 0) {
+				//	System.out.print(t + ", ");
+				//}
 
 				t++;
 			}
@@ -578,7 +583,8 @@ public class fuplaOOC {
 
 				double stepSize = (m_DoRegularization) ? (alpha[i] / (1 + ii)) : (alpha[i] / (1 + (m_Lambda * ii)));
 
-				dParameters_.updateParameters(alpha[i], gradients);
+				//dParameters_.updateParameters(alpha[i], gradients);
+				updateParameters(instance, probs, x_C, stepSize, gradients);
 			}
 
 			/* Test Classifier  with alpha i */
@@ -618,7 +624,7 @@ public class fuplaOOC {
 			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
 		}
 
-		dParameters_.initializeParametersWithVal(1);
+		dParameters_.initializeParametersWithVal(0);
 
 		return alpha[SUtils.minLocationInAnArray(perf)];
 	}
@@ -655,6 +661,7 @@ public class fuplaOOC {
 		int np = dParameters_.getNp();
 
 		double[] G = new double[np];
+		double[] gradients = new double[np];
 
 		System.out.print("fx_ADAGRAD = [");
 
@@ -671,7 +678,7 @@ public class fuplaOOC {
 			Instance row;
 			while ((row = reader.readInstance(structure)) != null)  {
 
-				double[] gradients = new double[np];
+				Arrays.fill(gradients, 0);
 
 				int x_C = (int) row.classValue();
 				double[] probs = predict(row);
@@ -696,7 +703,78 @@ public class fuplaOOC {
 					}
 				}
 
-				dParameters_.updateParameters(stepSize, gradients);
+				//dParameters_.updateParameters(stepSize, gradients);
+				updateParameters(row, probs, x_C, stepSize, gradients);
+
+				t++;
+			}
+
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
+
+	}
+	
+	
+	private void doAdagradOpt(File sourceFile) throws FileNotFoundException, IOException {
+
+		System.out.println("Running and OPT version");
+		System.out.println("Eta_0 = " + m_Eta);
+		System.out.println("SmoothingParameter = " + smoothingParameter);
+		System.out.println(" ----------------------------------- ");
+
+		ArrayList<Integer> indexList = null;
+
+		if (m_DoCrossvalidate) {
+
+			Instances instancesTrain = null;
+			Instances instancesTest = null;
+
+			Instances[] instanceList;
+			//instanceList = getTrainTestInstances(sourceFile, N);
+
+			indexList = getTrainTestIndices(N);
+			instanceList = getTrainTestInstances(sourceFile, indexList);
+
+			Collections.sort(indexList);
+
+			instancesTrain = instanceList[0];
+			instancesTest = instanceList[1];
+
+			System.out.println("Finding Alpha (Adagrad), Please Wait");
+			m_Eta = optimizeAlphaAdagrad(sourceFile, instancesTrain, instancesTest);
+			System.out.println("Using m_Eta (after Cross-validation) = " + m_Eta);
+		}
+
+		int np = dParameters_.getNp();
+
+		double[] G = new double[np];
+		double[] gradients = new double[np];
+
+		System.out.print("fx_ADAGRAD = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		int t = 0;
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			this.structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+
+			Instance row;
+			while ((row = reader.readInstance(structure)) != null)  {
+
+				Arrays.fill(gradients, 0);
+
+				int x_C = (int) row.classValue();
+				double[] probs = predict(row);
+				SUtils.exp(probs);
+
+				computeGradAndUpdateParameters(row, probs, x_C, gradients, G);
 
 				t++;
 			}
@@ -721,12 +799,15 @@ public class fuplaOOC {
 			System.out.print(".");
 
 			dParameters_.initializeParametersWithVal(0);
+
 			double[] G = new double[np];
+			double[] gradients = new double[np];
 
 			/* Train Classifier  with alpha i */
 			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
 				Instance instance = instancesTrain.instance(ii);
-				double[] gradients = new double[np];
+
+				Arrays.fill(gradients, 0);
 
 				int x_C = (int) instance.classValue();
 				double[] probs = predict(instance);
@@ -748,7 +829,8 @@ public class fuplaOOC {
 				}
 
 				// Updated parameters
-				dParameters_.updateParameters(stepSize, gradients);
+				//dParameters_.updateParameters(stepSize, gradients);
+				updateParameters(instance, probs, x_C, stepSize, gradients);
 			}
 
 			/* Test Classifier  with alpha i */
@@ -788,7 +870,7 @@ public class fuplaOOC {
 			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
 		}
 
-		dParameters_.initializeParametersWithVal(1);
+		dParameters_.initializeParametersWithVal(0);
 
 		return alpha[SUtils.minLocationInAnArray(perf)];
 	}
@@ -829,6 +911,8 @@ public class fuplaOOC {
 		double[] G = new double[np];
 		double[] D = new double[np];
 
+		double[] gradients = new double[np];
+
 		System.out.print("fx_ADADELTA = [");
 
 		double f = evaluateFunction(sourceFile);
@@ -844,7 +928,7 @@ public class fuplaOOC {
 			Instance row;
 			while ((row = reader.readInstance(structure)) != null)  {
 
-				double[] gradients = new double[np];
+				Arrays.fill(gradients, 0);
 
 				int x_C = (int) row.classValue();
 				double[] probs = predict(row);
@@ -866,7 +950,8 @@ public class fuplaOOC {
 					D[i] = (rho * D[i]) + ((1.0 - rho) * (stepSize[i] * stepSize[i]));
 				}
 
-				dParameters_.updateParameters(stepSize, gradients);
+				//dParameters_.updateParameters(stepSize, gradients);
+				updateParameters(row, probs, x_C, stepSize, gradients);
 
 				t++;
 			}
@@ -893,13 +978,17 @@ public class fuplaOOC {
 			System.out.print(".");
 
 			dParameters_.initializeParametersWithVal(0);
+
 			double[] G = new double[np];
 			double[] D = new double[np];
+
+			double[] gradients = new double[np];
 
 			/* Train Classifier  with alpha i */
 			for (int ii = 0; ii < instancesTrain.numInstances(); ii++) {
 				Instance instance = instancesTrain.instance(ii);
-				double[] gradients = new double[np];
+
+				Arrays.fill(gradients, 0);
 
 				int x_C = (int) instance.classValue();
 				double[] probs = predict(instance);
@@ -957,13 +1046,11 @@ public class fuplaOOC {
 			System.out.println("Alpha = " + alpha[i] + " -- " + "RMSE = " + perf[i]);
 		}
 
-		dParameters_.initializeParametersWithVal(1);
+		dParameters_.initializeParametersWithVal(0);
 
 		return alpha[SUtils.minLocationInAnArray(perf)];
 
 	}
-
-
 
 	/*
 	 * -------------------------------------------------------------------------------------
@@ -1064,6 +1151,132 @@ public class fuplaOOC {
 
 					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
 				}
+			}
+		}
+
+	}
+	
+	private void computeGradAndUpdateParameters(Instance inst, double[] probs, int x_C, double[] gradients, double[] G) {
+		
+		if (m_DoWANBIAC) {
+			for (int c = 0; c < nc; c++) {
+				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
+				
+				G[c] += (gradients[c] * gradients[c]);
+				
+				double stepSize = m_Eta / (smoothingParameter + Math.sqrt(G[c]));
+				if (stepSize == Double.POSITIVE_INFINITY) {
+					stepSize = 0.0;
+				}
+				
+				dParameters_.getParameters()[c] -= stepSize * gradients[c];
+			}
+
+			for (int u = 0; u < n; u++) {
+				int uval = (int) inst.value(m_Order[u]);
+
+				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+				for (int c = 0; c < nc; c++) {
+					int posp = wd.getXYIndex((int)uval, c);
+
+					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c);
+					
+					G[posp] += (gradients[posp] * gradients[posp]);
+					
+					double stepSize = m_Eta / (smoothingParameter + Math.sqrt(G[posp]));
+					if (stepSize == Double.POSITIVE_INFINITY) {
+						stepSize = 0.0;
+					}
+					
+					double newval = wd.getXYParameter(uval, c) - (stepSize * gradients[posp]);
+					wd.setXYParameter(uval, c, newval);
+
+					dParameters_.getParameters()[posp] = newval;
+				}
+			}
+		} else {
+			for (int c = 0; c < nc; c++) {
+				gradients[c] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+				
+				G[c] += (gradients[c] * gradients[c]);
+				
+				double stepSize = m_Eta / (smoothingParameter + Math.sqrt(G[c]));
+				if (stepSize == Double.POSITIVE_INFINITY) {
+					stepSize = 0.0;
+				}
+				
+				dParameters_.getParameters()[c] -= stepSize * gradients[c];
+			}
+
+			for (int u = 0; u < n; u++) {
+				int uval = (int) inst.value(m_Order[u]);
+
+				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+				for (int c = 0; c < nc; c++) {
+					int posp = wd.getXYIndex((int)uval, c);
+
+					gradients[posp] += (-1) * (SUtils.ind(c, x_C) - probs[c]);
+					
+					G[posp] += (gradients[posp] * gradients[posp]);
+					
+					double stepSize = m_Eta / (smoothingParameter + Math.sqrt(G[posp]));
+					if (stepSize == Double.POSITIVE_INFINITY) {
+						stepSize = 0.0;
+					}
+					
+					double newval = wd.getXYParameter(uval, c) - (stepSize * gradients[posp]);
+					wd.setXYParameter(uval, c, newval);
+
+					dParameters_.getParameters()[posp] = newval;
+				}
+			}
+		}
+		
+	}
+
+	private void updateParameters(Instance inst, double[] probs, int x_C, double stepSize, double[] gradients) {
+
+		for (int c = 0; c < nc; c++) {
+			dParameters_.getParameters()[c] -= stepSize * gradients[c];
+		}
+
+		for (int u = 0; u < n; u++) {
+			int uval = (int) inst.value(m_Order[u]);
+
+			wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+			for (int c = 0; c < nc; c++) {
+				int posp = wd.getXYIndex((int)uval, c);
+
+				double newval = wd.getXYParameter(uval, c) - (stepSize * gradients[posp]);
+				wd.setXYParameter(uval, c, newval);
+
+				dParameters_.getParameters()[posp] = newval;
+			}
+		}
+
+	}
+
+	private void updateParameters(Instance inst, double[] probs, int x_C, double[] stepSize, double[] gradients) {
+
+		for (int c = 0; c < nc; c++) {
+			dParameters_.getParameters()[c] -= stepSize[c] * gradients[c];
+		}
+
+		for (int u = 0; u < n; u++) {
+			int uval = (int) inst.value(m_Order[u]);
+
+			wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+			for (int c = 0; c < nc; c++) {
+				int posp = wd.getXYIndex((int)uval, c);
+
+				double newval = wd.getXYParameter(uval, c) - (stepSize[posp] * gradients[posp]);
+				wd.setXYParameter(uval, c, newval);
+
+				dParameters_.getParameters()[posp] = newval;
 			}
 		}
 
