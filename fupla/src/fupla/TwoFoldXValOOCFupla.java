@@ -32,6 +32,7 @@ public class TwoFoldXValOOCFupla {
 
 	private static String m_O = "adagrad";                             // -O
 	private static boolean m_DoRegularization = false;		  // -R
+	private static boolean m_DoAdaptiveRegularization = false;		  // -A
 	private static double m_Lambda = 0.001;						  // -L
 	private static double m_Eta = 0.01;                                 // -E
 	private static boolean m_DoCrossvalidate = false;          // -C
@@ -118,6 +119,7 @@ public class TwoFoldXValOOCFupla {
 				learner.setM_Eta(m_Eta);
 				learner.setM_DoRegularization(m_DoRegularization);
 				if (m_DoRegularization) {
+					learner.setM_DoAdaptiveRegularization(m_DoAdaptiveRegularization);
 					learner.setM_Lambda(m_Lambda);
 				}
 				learner.setM_NumIterations(m_NumIterations);
@@ -210,6 +212,7 @@ public class TwoFoldXValOOCFupla {
 				learner.setM_Eta(m_Eta);
 				learner.setM_DoRegularization(m_DoRegularization);
 				if (m_DoRegularization) {
+					learner.setM_DoAdaptiveRegularization(m_DoAdaptiveRegularization);
 					learner.setM_Lambda(m_Lambda);
 				}
 				learner.setM_NumIterations(m_NumIterations);
@@ -361,6 +364,7 @@ public class TwoFoldXValOOCFupla {
 		m_DoRegularization = Utils.getFlag('R', options);
 
 		if (m_DoRegularization) {
+			m_DoAdaptiveRegularization = Utils.getFlag('A', options);
 			String strL = Utils.getOption('L', options);
 			if (strL.length() != 0) {
 				m_Lambda = Double.valueOf(strL);
