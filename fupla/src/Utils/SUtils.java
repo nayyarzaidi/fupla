@@ -1,11 +1,22 @@
 package Utils;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Random;
 
 import org.apache.commons.math3.util.FastMath;
 
+import weka.core.Instance;
 import weka.core.Instances;
 import weka.core.Utils;
+import weka.core.converters.ArffSaver;
+import weka.core.converters.Saver;
+import weka.core.converters.ArffLoader.ArffReader;
 
 public class SUtils {
 
@@ -477,6 +488,203 @@ public class SUtils {
 		
 		return data;
 	}
+	
+public static File discretizeData(File sourceFile, Instances CVInstances, int BUFFER_SIZE, int ARFF_BUFFER_SIZE, int type, int numBins) throws Exception {
+		
+		File out = File.createTempFile("trainCV-", ".arff");
+
+		Instances m_DiscreteInstances = null;
+
+		if (type == 1) {
+			
+			/* MDL based discretization */
+
+			System.out.println("Starting MDL Discretization");
+			
+			weka.filters.supervised.attribute.Discretize m_Disc = null;
+
+			m_Disc = new weka.filters.supervised.attribute.Discretize();
+			m_Disc.setUseBinNumbers(true);
+			m_Disc.setInputFormat(CVInstances);
+
+			m_DiscreteInstances = weka.filters.Filter.useFilter(CVInstances, m_Disc);
+
+			out.deleteOnExit();
+
+			ArffSaver fileSaver = new ArffSaver();
+			fileSaver.setFile(out);
+			fileSaver.setRetrieval(Saver.INCREMENTAL);
+			fileSaver.setStructure(m_DiscreteInstances);
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), ARFF_BUFFER_SIZE);
+			Instances structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+
+			Instance row;
+			int i = 0;
+			while ((row = reader.readInstance(structure)) != null)  {
+				m_Disc.input(row);
+				row = m_Disc.output();
+
+				fileSaver.writeIncremental(row);
+				i++;
+
+			}
+		} else if (type == 2) {
+			
+			/* Equal Frequency based discretization */
+			
+			System.out.println("Starting Equal Frequency Discretization with " + numBins + " bins.");
+			
+			weka.filters.unsupervised.attribute.Discretize m_Disc = null;
+
+			m_Disc = new weka.filters.unsupervised.attribute.Discretize();
+			m_Disc.setUseBinNumbers(true);
+			m_Disc.setInputFormat(CVInstances);
+			m_Disc.setBins(numBins);
+
+			m_DiscreteInstances = weka.filters.Filter.useFilter(CVInstances, m_Disc);
+
+			out.deleteOnExit();
+
+			ArffSaver fileSaver = new ArffSaver();
+			fileSaver.setFile(out);
+			fileSaver.setRetrieval(Saver.INCREMENTAL);
+			fileSaver.setStructure(m_DiscreteInstances);
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), ARFF_BUFFER_SIZE);
+			Instances structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+
+			Instance row;
+			int i = 0;
+			while ((row = reader.readInstance(structure)) != null)  {
+				m_Disc.input(row);
+				row = m_Disc.output();
+
+				fileSaver.writeIncremental(row);
+				i++;
+
+			}
+			
+		}
+
+		return out;
+	}
+
+	public static File normalizeData(File sourceFile, Instances CVInstances, int BUFFER_SIZE, int ARFF_BUFFER_SIZE) throws Exception {
+
+		System.out.println("Starting Normalization");
+
+		Instances m_NormalizedInstances = null;
+
+		weka.filters.unsupervised.attribute.Normalize m_Norm = null;
+
+		m_Norm = new weka.filters.unsupervised.attribute.Normalize();
+		m_Norm.setInputFormat(CVInstances);
+
+		m_NormalizedInstances = weka.filters.Filter.useFilter(CVInstances, m_Norm);
+
+		File out = File.createTempFile("trainCV-", ".arff");
+		out.deleteOnExit();
+
+		ArffSaver fileSaver = new ArffSaver();
+		fileSaver.setFile(out);
+		fileSaver.setRetrieval(Saver.INCREMENTAL);
+		fileSaver.setStructure(m_NormalizedInstances);
+
+		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), ARFF_BUFFER_SIZE);
+		Instances structure = reader.getStructure();
+		structure.setClassIndex(structure.numAttributes() - 1);
+
+		Instance row;
+		int i = 0;
+		while ((row = reader.readInstance(structure)) != null)  {
+			m_Norm.input(row);
+			row = m_Norm.output();
+
+			fileSaver.writeIncremental(row);
+			i++;
+
+		}
+
+		return out;
+	}
+	
+	public static BitSet getStratifiedIndices(File sourceFile, int BUFFER_SIZE, int ARFF_BUFFER_SIZE, int S) throws FileNotFoundException, IOException {
+
+		BitSet res = new BitSet();
+
+		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), ARFF_BUFFER_SIZE);
+		Instances structure = reader.getStructure();
+		structure.setClassIndex(structure.numAttributes() - 1);
+		int nc = structure.numClasses();
+
+		int[] classCount = new int[nc];
+		int[] numToBeSelected = new int[nc];
+		int[] numSelected = new int[nc];
+		double[] selectionProb = new double[nc];
+
+		Instance current;
+		while ((current = reader.readInstance(structure)) != null) {
+			int x_C = (int) current.classValue();
+			classCount[x_C]++;
+		}
+
+		for (int c = 0; c < nc; c++) {
+			if (classCount[c] < 50) {
+				numToBeSelected[c] = classCount[c]/2;
+				selectionProb[c] = 0.5;
+			} else { 
+				numToBeSelected[c] = (classCount[c]/100) * S;
+				selectionProb[c] = (double) S / 100;
+			}
+		}
+
+		reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), ARFF_BUFFER_SIZE);
+		int lineNo = 0;
+		while ((current = reader.readInstance(structure)) != null) {
+			int x_C = (int) current.classValue();
+
+			if (Math.random() < selectionProb[x_C]) {
+				res.set(lineNo);
+				numSelected[x_C]++;
+			}
+
+			lineNo++;
+		}
+
+		System.out.println("-------------------------------------------------------------------");
+		System.out.println("Class Counts = " + Arrays.toString(classCount));
+		System.out.println("Num to be selected = " + Arrays.toString(numToBeSelected));
+		System.out.println("Actually selected = " + Arrays.toString(numSelected));
+		System.out.println("-------------------------------------------------------------------");
+
+		return res;
+	}
+
+	public static Instances getTrainTestInstances(File sourceFile, BitSet res, int BUFFER_SIZE, int ARFF_BUFFER_SIZE) throws FileNotFoundException, IOException {
+
+		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), ARFF_BUFFER_SIZE);
+		Instances structure = reader.getStructure();
+		structure.setClassIndex(structure.numAttributes() - 1);
+
+		Instances CVInstances = new Instances(structure);
+
+		int i = 0;
+		Instance row;
+		while ((row = reader.readInstance(structure)) != null)  {
+			if (res.get(i)) {
+				CVInstances.add(row);
+			}
+			i++;
+		}
+
+		System.out.println("-- CVInstances file created (in memory) -- Size = " + CVInstances.numInstances());
+
+		return CVInstances;
+	}
+
 
 }
 

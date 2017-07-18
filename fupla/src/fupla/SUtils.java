@@ -503,6 +503,33 @@ public class SUtils {
 			}		
 		}
 	}
+	
+	public static boolean monotonic(double[] results) {
+
+		double[] diff = new double[results.length - 1];
+
+		for (int i = 0; i < results.length - 2; i++) {
+			diff[i] = results[i + 1] - results[i];
+		}
+
+		int numSadlePoints = 0;
+
+		for (int i = 0; i < diff.length - 2; i++) {
+			if (!sameSign(diff[i + 1], diff[i]))  {
+				numSadlePoints++;
+			}
+		}
+
+		if (numSadlePoints > 1) 
+			return false;
+		else
+			return true;
+
+	}
+	
+	private static boolean sameSign(double a, double b) {
+		return ((a<0) == (b<0)); 
+	}
 
 }
 

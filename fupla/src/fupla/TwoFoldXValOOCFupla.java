@@ -13,6 +13,7 @@ import java.util.List;
 
 import org.apache.commons.math3.random.MersenneTwister;
 
+import Utils.SUtils;
 import weka.core.Instance;
 import weka.core.Instances;
 import weka.core.Utils;
@@ -25,14 +26,16 @@ public class TwoFoldXValOOCFupla {
 	private static String data = "";
 
 	private static boolean m_MVerb = false; 					      // -V
-
-	private static int m_KDB = 1;										       // -K
-	private static boolean m_DoSKDB = false;				      // -S
 	private static boolean m_DoDiscriminative = false; 	      // -D
 
+	private static int m_KDB = 1;										       // -K
 	private static String m_O = "adagrad";                             // -O
+
+	private static boolean m_DoSKDB = false;				      // -S
+
 	private static boolean m_DoRegularization = false;		  // -R
-	private static boolean m_DoAdaptiveRegularization = false;		  // -A
+	private static int m_DoAdaptiveRegularization = 0;		      // -A
+
 	private static double m_Lambda = 0.001;						  // -L
 	private static double m_Eta = 0.01;                                 // -E
 	private static boolean m_DoCrossvalidate = false;          // -C
@@ -41,10 +44,15 @@ public class TwoFoldXValOOCFupla {
 	private static int m_BufferSize = 1;                                  // -B
 
 	private static boolean m_DoWANBIAC = false;               // -W
+	private static boolean m_EndIterFlag = false;               // -Z
 
-	private static int m_nExp = 5;                                         // -X
+	private static int m_nExp 						= 5;                  // -X
+	private static int m_Folds 						= 2;                  // -Y
+
+	private static boolean m_Discretization = false;          // -Q
 
 	public static final int BUFFER_SIZE = 10*1024*1024; 	//100MB
+	public static final int ARFF_BUFFER_SIZE = 100000;
 
 	public static void main(String[] args) throws Exception {
 
@@ -75,8 +83,32 @@ public class TwoFoldXValOOCFupla {
 		int N = getNumData(sourceFile, structure);
 		System.out.println("Read " + N + " datapoints");
 
+		/*
+		 * Discretize data and store on the disk
+		 */
+		File disc_sourceFile = null;
+		if (m_Discretization) {
+			int S = 5; // use 5% of the data for getting these indices
+			BitSet res = SUtils.getStratifiedIndices(sourceFile, BUFFER_SIZE, ARFF_BUFFER_SIZE, S);
+			Instances CVInstances = SUtils.getTrainTestInstances(sourceFile, res, BUFFER_SIZE, ARFF_BUFFER_SIZE);
+
+			disc_sourceFile = SUtils.discretizeData(sourceFile, CVInstances, BUFFER_SIZE, ARFF_BUFFER_SIZE, 2, 500);
+			System.out.println("Discretized Instances created at:  '" + disc_sourceFile.getAbsolutePath() + "'");
+			sourceFile = disc_sourceFile;
+
+			reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), ARFF_BUFFER_SIZE);
+
+			structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+			nc = structure.numClasses();
+			N = getNumData(sourceFile, structure);
+			System.out.println("Read " + N + " datapoints");
+		}
+
 		double m_RMSE = 0;
 		double m_Error = 0;
+		double m_LogLoss = 0;
+
 		int NTest = 0;
 		long seed = 3071980;
 
@@ -93,191 +125,144 @@ public class TwoFoldXValOOCFupla {
 
 		double[][] instanceProbs = new double[lineNo][nc];
 
+		double trainTime = 0, testTime = 0;
+		double trainStart = 0, testStart = 0;
+
 		for (int exp = 0; exp < m_nExp; exp++) {
+
+			seed++;
 
 			if (m_MVerb) {
 				System.out.println("Experiment No. " + exp);
 			}
 
 			MersenneTwister rg = new MersenneTwister(seed);
-			BitSet test0Indexes = getTest0Indexes(sourceFile, structure, rg);
+			BitSet indexes = null;
 
-			// ---------------------------------------------------------
-			// Train on Fold 0
-			// ---------------------------------------------------------
+			for (int fold = 0; fold < 2; fold++) {
+				if (m_MVerb) {
+					System.out.println("Fold No. " + fold);
+				}	
 
-			fuplaOOC learner = new fuplaOOC();
-			//fuplaOOCReg learner = new fuplaOOCReg();
-			//hfuplaOOC learner = new hfuplaOOC();
+				if (fold == 0) {
 
-			learner.setM_MVerb(m_MVerb);
-			learner.setM_KDB(m_KDB);
-			learner.setM_DoSKDB(m_DoSKDB);
-			learner.setM_DoDiscriminative(m_DoDiscriminative);
-			if (m_DoDiscriminative) {
-				learner.setM_O(m_O);
-				learner.setM_Eta(m_Eta);
-				learner.setM_DoRegularization(m_DoRegularization);
-				if (m_DoRegularization) {
-					learner.setM_DoAdaptiveRegularization(m_DoAdaptiveRegularization);
-					learner.setM_Lambda(m_Lambda);
+					BitSet test0Indexes = getTest0Indexes(sourceFile, structure, rg);
+					indexes = test0Indexes;
+
+				} else if (fold == 1) {
+
+					BitSet test1Indexes = new BitSet(lineNo);
+					test1Indexes.set(0, lineNo);
+					test1Indexes.xor(indexes);
+
+					indexes = test1Indexes;
 				}
-				learner.setM_NumIterations(m_NumIterations);
-				learner.setM_BufferSize(m_BufferSize);   
-				learner.setM_DoCrossvalidate(m_DoCrossvalidate);
-			}
-			learner.setM_DoWANBIAC(m_DoWANBIAC);
 
-			// creating tempFile for train0
-			File trainFile = createTrainTmpFile(sourceFile, structure, test0Indexes);
-			System.out.println("Train file generated");
+				//System.out.println(indexes);
 
-			if (m_MVerb) {
-				System.out.println("Training fold 0: trainFile is '" + trainFile.getAbsolutePath() + "'");
-			}
+				// ---------------------------------------------------------
+				// Train on this fold
+				// ---------------------------------------------------------
 
-			learner.buildClassifier(trainFile);
+				File trainFile;
 
-			// ---------------------------------------------------------
-			// Test on Fold 1
-			// ---------------------------------------------------------
-			if (m_MVerb) {
-				System.out.println("Testing fold 0 started");
-			}
+				fuplaOOC learner = new fuplaOOC();
 
-			int thisNTest = 0;
+				learner.setM_MVerb(m_MVerb);
+				learner.setM_KDB(m_KDB);
+				learner.setM_DoSKDB(m_DoSKDB);
+				learner.setM_DoDiscriminative(m_DoDiscriminative);
+				if (m_DoDiscriminative) {
+					learner.setM_O(m_O);
+					learner.setM_Eta(m_Eta);
+					learner.setM_DoRegularization(m_DoRegularization);
+					if (m_DoRegularization) {
+						learner.setM_DoAdaptiveRegularization(m_DoAdaptiveRegularization);
+						learner.setM_Lambda(m_Lambda);
+					}
+					learner.setM_NumIterations(m_NumIterations);
+					learner.setM_BufferSize(m_BufferSize);   
+					learner.setM_DoCrossvalidate(m_DoCrossvalidate);
+				}
+				learner.setM_DoWANBIAC(m_DoWANBIAC);
 
-			lineNo = 0;
-			reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), 100000);
-			while ((current = reader.readInstance(structure)) != null) {
-				if (test0Indexes.get(lineNo)) {
-					double[] probs = new double[nc];
-					probs = learner.distributionForInstance(current);
-					int x_C = (int) current.classValue();
+				// creating tempFile for train0
+				trainFile = createTrainTmpFile(sourceFile, structure, indexes);
+				System.out.println("Train file generated");
 
-					// ------------------------------------
-					// Update Error and RMSE
-					// ------------------------------------
-					int pred = -1;
-					double bestProb = Double.MIN_VALUE;
-					for (int y = 0; y < nc; y++) {
-						if (!Double.isNaN(probs[y])) {
-							if (probs[y] > bestProb) {
-								pred = y;
-								bestProb = probs[y];
+				if (m_MVerb) {
+					System.out.println("Training fold 0: trainFile is '" + trainFile.getAbsolutePath() + "'");
+				}
+
+				trainStart = System.currentTimeMillis();
+
+				learner.buildClassifier(trainFile);	
+
+				trainTime += (System.currentTimeMillis() - trainStart);
+
+				// ---------------------------------------------------------
+				// Test on this fold
+				// ---------------------------------------------------------
+				if (m_MVerb) {
+					System.out.println("Testing fold 0 started");
+				}
+
+				testStart = System.currentTimeMillis();
+
+				int thisNTest = 0;
+
+				lineNo = 0;
+				reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), 100000);
+				while ((current = reader.readInstance(structure)) != null) {
+					if (indexes.get(lineNo)) {
+						double[] probs = new double[nc];
+						int x_C = (int) current.classValue();
+
+						probs = learner.distributionForInstance(current);	
+
+						// ------------------------------------
+						// Update Error and RMSE
+						// ------------------------------------
+						int pred = -1;
+						double bestProb = Double.MIN_VALUE;
+						for (int y = 0; y < nc; y++) {
+							if (!Double.isNaN(probs[y])) {
+								if (probs[y] > bestProb) {
+									pred = y;
+									bestProb = probs[y];
+								}
+								m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
+							} else {
+								System.err.println("probs[ " + y + "] is NaN! oh no!");
 							}
-							m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
-						} else {
-							System.err.println("probs[ " + y + "] is NaN! oh no!");
 						}
-					}
 
-					if (pred != x_C) {
-						m_Error += 1;
-					}
-
-					thisNTest++;
-					NTest++;
-
-					instanceProbs[lineNo][pred]++;
-				}
-				lineNo++;
-			}
-
-			if (m_MVerb) {
-				System.out.println("Testing fold 0 finished - 0-1=" + (m_Error / NTest) + "\trmse=" + Math.sqrt(m_RMSE / NTest));
-			}
-
-			if (Math.abs(thisNTest - test0Indexes.cardinality()) > 1) {
-				System.err.println("no! " + thisNTest + "\t" + test0Indexes.cardinality());
-			}
-
-			BitSet test1Indexes = new BitSet(lineNo);
-			test1Indexes.set(0, lineNo);
-			test1Indexes.xor(test0Indexes);
-
-			// ---------------------------------------------------------
-			// Train on Fold 1
-			// ---------------------------------------------------------
-			learner = new fuplaOOC();
-			//learner = new fuplaOOCReg();
-			//learner = new hfuplaOOC();
-
-			learner.setM_MVerb(m_MVerb);
-			learner.setM_KDB(m_KDB);
-			learner.setM_DoSKDB(m_DoSKDB);
-			learner.setM_DoDiscriminative(m_DoDiscriminative);
-			if (m_DoDiscriminative) {
-				learner.setM_O(m_O);
-				learner.setM_Eta(m_Eta);
-				learner.setM_DoRegularization(m_DoRegularization);
-				if (m_DoRegularization) {
-					learner.setM_DoAdaptiveRegularization(m_DoAdaptiveRegularization);
-					learner.setM_Lambda(m_Lambda);
-				}
-				learner.setM_NumIterations(m_NumIterations);
-				learner.setM_BufferSize(m_BufferSize);   
-				learner.setM_DoCrossvalidate(m_DoCrossvalidate);
-			}
-			learner.setM_DoWANBIAC(m_DoWANBIAC);
-
-			// creating tempFile for train0
-			trainFile = createTrainTmpFile(sourceFile, structure, test1Indexes);
-
-			if (m_MVerb) {
-				System.out.println("Training fold 1: trainFile is '" + trainFile.getAbsolutePath() + "'");
-			}
-
-			learner.buildClassifier(trainFile);
-
-			// ---------------------------------------------------------
-			// Test on Fold 0
-			// ---------------------------------------------------------
-			if (m_MVerb) {
-				System.out.println("Testing fold 0 started");
-			}
-
-			lineNo = 0;
-			reader = new ArffReader(new BufferedReader(new FileReader(sourceFile),BUFFER_SIZE), 100000);
-			while ((current = reader.readInstance(structure)) != null) {
-				if (test1Indexes.get(lineNo)) {
-					double[] probs = new double[nc];
-					probs = learner.distributionForInstance(current);
-					int x_C = (int) current.classValue();
-
-					// ------------------------------------
-					// Update Error and RMSE
-					// ------------------------------------
-					int pred = -1;
-					double bestProb = Double.MIN_VALUE;
-					for (int y = 0; y < nc; y++) {
-						if (!Double.isNaN(probs[y])) {
-							if (probs[y] > bestProb) {
-								pred = y;
-								bestProb = probs[y];
-							}
-							m_RMSE += (1 / (double) nc * Math.pow((probs[y] - ((y == x_C) ? 1 : 0)), 2));
-						} else {
-							System.err.println("probs[ " + y + "] is NaN! oh no!");
+						if (pred != x_C) {
+							m_Error += 1;
 						}
+
+						m_LogLoss -= Math.log(probs[x_C]);
+
+						thisNTest++;
+						NTest++;
+
+						instanceProbs[lineNo][pred]++;
 					}
-
-					if (pred != x_C) {
-						m_Error += 1;
-					}
-
-					NTest++;
-
-					instanceProbs[lineNo][pred]++;
+					lineNo++;
 				}
-				lineNo++;
-			}
 
-			if (m_MVerb) {
-				System.out.println("Testing exp " + exp + " fold 1 finished - 0-1=" + (m_Error / NTest) + "\trmse=" + Math.sqrt(m_RMSE / NTest));
-			}
+				testTime += System.currentTimeMillis() - testStart;
 
-			seed++;
+				if (m_MVerb) {
+					System.out.println("Testing fold " + fold + " finished - 0-1=" + (m_Error / NTest) + "\trmse=" + Math.sqrt(m_RMSE / NTest) + "\tlogloss=" + m_LogLoss / (nc * NTest));
+				}
+
+				if (Math.abs(thisNTest - indexes.cardinality()) > 1) {
+					System.err.println("no! " + thisNTest + "\t" + indexes.cardinality());
+				}
+
+			} // Ends No. of Folds
+			
 		} // Ends No. of Experiments
 
 
@@ -312,10 +297,13 @@ public class TwoFoldXValOOCFupla {
 		System.out.print("\nBias-Variance Decomposition\n");
 		System.out.print("\nClassifier	   : FuplaOOC (K = " + m_KDB + ")");
 		System.out.print( "\nData File   : " + data);
-		System.out.print("\nError           : " + Utils.doubleToString(m_Error / NTest, 6, 4));
-		System.out.print("\nBias^2        : " + Utils.doubleToString(m_Bias, 6, 4));
-		System.out.print("\nVariance     : " + Utils.doubleToString(m_Variance, 6, 4));
-		System.out.print("\nRMSE          : " + Utils.doubleToString(Math.sqrt(m_RMSE / NTest), 6, 4));
+		System.out.print("\nError               : " + Utils.doubleToString(m_Error / NTest, 6, 4));
+		System.out.print("\nBias^2             : " + Utils.doubleToString(m_Bias, 6, 4));
+		System.out.print("\nVariance          : " + Utils.doubleToString(m_Variance, 6, 4));
+		System.out.print("\nRMSE              : " + Utils.doubleToString(Math.sqrt(m_RMSE / NTest), 6, 4));
+		System.out.print("\nLogLoss          : " + Utils.doubleToString(m_LogLoss / (nc * NTest), 6, 4));
+		System.out.print("\nTraining Time  : " + Utils.doubleToString(trainTime/1000, 6, 4));
+		System.out.print("\nTesting Time   : " + Utils.doubleToString(testTime/1000, 6, 4));
 		System.out.print("\n\n\n");
 
 	}
@@ -364,7 +352,13 @@ public class TwoFoldXValOOCFupla {
 		m_DoRegularization = Utils.getFlag('R', options);
 
 		if (m_DoRegularization) {
-			m_DoAdaptiveRegularization = Utils.getFlag('A', options);
+			//m_DoAdaptiveRegularization = Utils.getFlag('A', options);
+
+			String strA= Utils.getOption('A', options);
+			if (strA.length() != 0) {
+				m_DoAdaptiveRegularization = Integer.valueOf(strA);
+			}
+
 			String strL = Utils.getOption('L', options);
 			if (strL.length() != 0) {
 				m_Lambda = Double.valueOf(strL);

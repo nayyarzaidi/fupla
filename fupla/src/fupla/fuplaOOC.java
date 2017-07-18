@@ -38,7 +38,7 @@ public class fuplaOOC {
 	private String m_O = "adagrad";								// -O
 
 	private static boolean m_DoRegularization = false;		  // -R
-	private static boolean m_DoAdaptiveRegularization = false;		  // -A
+	private static int m_DoAdaptiveRegularization = 0;		  // -A
 
 	private static double m_Lambda = 0.001;						  // -L
 	private static double m_Eta = 0.01;                                 // -E
@@ -54,10 +54,13 @@ public class fuplaOOC {
 	int m_BestK_ = 0; 
 	int m_BestattIt = 0;
 
-	private static final int BUFFER_SIZE = 100000;
-	
+	private static final int BUFFER_SIZE = 10000000;
+
 	private Instances instancesTrain = null;
 	private Instances instancesTest = null;
+	private Instances instances = null;
+
+	private double m_LambdaLog = 0;
 
 	public void buildClassifier(File sourceFile) throws Exception {
 
@@ -98,6 +101,8 @@ public class fuplaOOC {
 			if (m_DoRegularization) {
 				System.out.println("m_DoAdaptiveRegularization = " + m_DoAdaptiveRegularization);
 				System.out.println("m_Lambda = " + m_Lambda);
+				m_LambdaLog = Math.log10(m_Lambda);
+				System.out.println("m_LambdaLog = " + m_LambdaLog);
 			}
 			System.out.println("m_DoCrossvalidate = " + m_DoCrossvalidate);
 		} else {
@@ -823,12 +828,12 @@ public class fuplaOOC {
 		ArrayList<Integer> indexList = null;
 
 		if (m_DoCrossvalidate) {
-			
+
 			boolean tempRegularization = m_DoRegularization;
-			boolean tempAdaptiveRegularization = m_DoAdaptiveRegularization;
+			int tempAdaptiveRegularization = m_DoAdaptiveRegularization;
 			m_DoRegularization = false;
-			m_DoAdaptiveRegularization = false;
-			
+			m_DoAdaptiveRegularization = 0;
+
 			Instances[] instanceList;
 
 			indexList = getTrainTestIndices(N);
@@ -838,13 +843,14 @@ public class fuplaOOC {
 
 			instancesTrain = instanceList[0];
 			instancesTest = instanceList[1];
+			instances = instanceList[2];
 
 			System.out.println("Finding Alpha (Adagrad), Please Wait");
 			//m_Eta = optimizeAlphaAdagrad(sourceFile, instancesTrain, instancesTest);
 			//m_Eta = optimizeAlphaAdagradOpt(sourceFile, instancesTrain, instancesTest);
 			m_Eta = optimizeAlphaAdagradRecursiveCaller(sourceFile, -6, 6, 10, instancesTrain,  instancesTest);
 			System.out.println("Using m_Eta (after Cross-validation) = " + m_Eta);
-			
+
 			m_DoRegularization = tempRegularization;
 			m_DoAdaptiveRegularization = tempAdaptiveRegularization;
 		}
@@ -857,6 +863,7 @@ public class fuplaOOC {
 
 		double f = evaluateFunction(sourceFile);
 		System.out.print(f + ", ");
+		//System.out.println("Lambda = " + m_Lambda);
 
 		int t = 0;
 		for (int iter = 0; iter < m_NumIterations; iter++) {
@@ -866,7 +873,15 @@ public class fuplaOOC {
 			structure.setClassIndex(structure.numAttributes() - 1);
 
 			Instance row;
+			int index = 0;
 			while ((row = reader.readInstance(structure)) != null)  {
+
+				if (m_DoCrossvalidate) {
+					if (Collections.binarySearch(indexList, index) >= 0) {
+						index++;
+						continue;
+					}
+				}
 
 				int x_C = (int) row.classValue();
 				double[] probs = predict(row);
@@ -874,15 +889,39 @@ public class fuplaOOC {
 
 				computeGradAndUpdateParameters(row, probs, x_C, G);
 
+				index++;
 				t++;
 			}
 
 			f = evaluateFunction(sourceFile);
 			System.out.print(f + ", ");
+
+			if (isM_DoAdaptiveRegularization()) {
+
+				double fDisc = evaluateFunction(instancesTrain);
+				double fMap = evaluateFunctionMAP(instancesTrain);
+
+				if (m_DoAdaptiveRegularization == 3) {
+
+					if (fMap < fDisc) {
+						// increase regularization -- reduce variance
+						m_LambdaLog += 1; //(fDisc - fMap);
+						m_Lambda = Math.pow(10, m_LambdaLog);
+
+					} else {
+						// decrease regularization -- reduce bias
+						m_LambdaLog -=  1; //(fMap - fDisc);
+						m_Lambda = Math.pow(10, m_LambdaLog);
+
+					}
+				}
+			}
+
+			//System.out.println("Lambda = " + m_Lambda);
+
 		}
 		System.out.println("];");
-		System.out.println("Did: " + t + " updates.");
-
+		System.out.println("Did a total of: " + t + " updates.");
 	}
 
 	private double optimizeAlphaAdagradOpt(File sourceFile, Instances instancesTrain, Instances instancesTest) {
@@ -1010,7 +1049,7 @@ public class fuplaOOC {
 			double m_RMSE = 0;
 
 			for (int ii = 0; ii < instancesTest.numInstances(); ii++) {
-				Instance instance = instancesTrain.instance(ii);
+				Instance instance = instancesTest.instance(ii);
 				double[] probs = new double[nc];
 				probs = distributionForInstance(instance);
 				int x_C = (int) instance.classValue();
@@ -1029,6 +1068,10 @@ public class fuplaOOC {
 
 		for (int i = 0; i < alpha.length; i++) {
 			System.out.println("Alpha = " + Math.pow(10,alpha[i]) + " -- " + "RMSE = " + perf[i]);
+		}
+
+		if (!SUtils.monotonic(perf)) {
+			System.out.println("******* non-monotonic sequence of RMSE *********");
 		}
 
 		dParameters_.initializeParametersWithVal(0);
@@ -1252,6 +1295,38 @@ public class fuplaOOC {
 		return f;
 	}
 
+	public double evaluateFunction(Instances instances) throws IOException {
+		double f = 0;
+		double mLogNC = - Math.log(nc);
+
+		for (int i = 0; i < instances.numInstances(); i++) {
+			Instance inst = instances.instance(i);
+
+			int x_C = (int) inst.classValue();
+			double[] probs = predict(inst);
+
+			f += mLogNC - probs[x_C];
+		}
+
+		return f;
+	}
+
+	public double evaluateFunctionMAP(Instances instances) throws IOException {
+		double f = 0;
+		double mLogNC = - Math.log(nc);
+
+		for (int i = 0; i < instances.numInstances(); i++) {
+			Instance inst = instances.instance(i);
+
+			int x_C = (int) inst.classValue();
+			double[] probs = predictMAP(inst);
+
+			f += mLogNC - probs[x_C];
+		}
+
+		return f;
+	}
+
 	private double[] predict(Instance inst) {
 		double[] probs = new double[nc];
 
@@ -1282,6 +1357,27 @@ public class fuplaOOC {
 				}
 			}
 		}
+
+		SUtils.normalizeInLogDomain(probs);
+		return probs;
+	}
+
+	private double[] predictMAP(Instance inst) {
+		double[] probs = new double[nc];
+
+		for (int c = 0; c < nc; c++) {
+			probs[c] = dParameters_.getClassProbabilities()[c];
+
+
+			for (int u = 0; u < n; u++) {
+				double uval = inst.value(m_Order[u]);
+
+				wdBayesNode wd = dParameters_.getBayesNode(inst, u);
+
+				probs[c] += wd.getXYProbability((int)uval, c);
+			}
+		}
+
 
 		SUtils.normalizeInLogDomain(probs);
 		return probs;
@@ -1328,12 +1424,13 @@ public class fuplaOOC {
 	private double computeGradSum(Instance inst, double[] probs, int x_C) {
 
 		double g = 0;
-		
+
 		if (m_DoWANBIAC) {
-			
+
 			for (int c = 0; c < nc; c++) {
-				g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c] * 
-						(dParameters_.getParameters()[c] - dParameters_.getClassProbabilities()[c]);
+				//g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c] * 
+				//		(dParameters_.getParameters()[c] - dParameters_.getClassProbabilities()[c]);
+				g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c] * (dParameters_.getParameters()[c] - 1.0);
 			}
 
 			for (int u = 0; u < n; u++) {
@@ -1344,16 +1441,16 @@ public class fuplaOOC {
 				for (int c = 0; c < nc; c++) {
 					int posp = wd.getXYIndex((int)uval, c);
 
-					g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c) * 
-							(wd.getXYParameter((int)uval, c) - wd.getXYProbability((int)uval, c));
+					//g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c) * 
+					//		(wd.getXYParameter((int)uval, c) - wd.getXYProbability((int)uval, c));
+					g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c) * (wd.getXYParameter((int)uval, c) - 1.0);
 				}
 			}
-			
+
 		} else {
-			
+
 			for (int c = 0; c < nc; c++) {
-				g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * 
-						dParameters_.getParameters()[c] * dParameters_.getClassProbabilities()[c];
+				g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * (dParameters_.getParameters()[c] - 0);
 			}
 
 			for (int u = 0; u < n; u++) {
@@ -1364,15 +1461,14 @@ public class fuplaOOC {
 				for (int c = 0; c < nc; c++) {
 					int posp = wd.getXYIndex((int)uval, c);
 
-					g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * 
-							wd.getXYParameter((int)uval, c) * wd.getXYProbability((int)uval, c);
+					g += (-1) * (SUtils.ind(c, x_C) - probs[c]) * (wd.getXYParameter((int)uval, c) - 0);
 				}
 			}
 		}
-		
+
 		return g;
 	}
-	
+
 	private void computeGradAndUpdateParameters(Instance inst, double[] probs, int x_C, double[] G) {
 
 		if (m_DoWANBIAC) {
@@ -1381,7 +1477,8 @@ public class fuplaOOC {
 				double g = (-1) * (SUtils.ind(c, x_C) - probs[c]) * dParameters_.getClassProbabilities()[c];
 
 				if (m_DoRegularization) {
-					g += (m_Lambda * (dParameters_.getParameters()[c] - dParameters_.getClassProbabilities()[c]));
+					//g += (m_Lambda * (dParameters_.getParameters()[c] - dParameters_.getClassProbabilities()[c]));
+					g += (m_Lambda * (dParameters_.getParameters()[c] - 1.0));
 				}
 
 				G[c] += (g*g);
@@ -1401,10 +1498,11 @@ public class fuplaOOC {
 
 				for (int c = 0; c < nc; c++) {
 					int posp = wd.getXYIndex((int)uval, c);
-					double g =  (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability((int)uval, c);
+					double g =  (-1) * (SUtils.ind(c, x_C) - probs[c]) * wd.getXYProbability(uval, c);
 
 					if (m_DoRegularization) {
-						g += (m_Lambda * (wd.getXYParameter((int)uval, c) - wd.getXYProbability((int)uval, c)));
+						//g += (m_Lambda * (wd.getXYParameter((int)uval, c) - wd.getXYProbability((int)uval, c)));
+						g += (m_Lambda * (wd.getXYParameter(uval, c) - 1.0));
 					}
 
 					G[posp] += (g*g);
@@ -1468,23 +1566,83 @@ public class fuplaOOC {
 				}
 			}
 		}
-		
-		if (m_DoAdaptiveRegularization) {
-			
-			MersenneTwister rg = new MersenneTwister();
-			int randSample = rg.nextInt(instancesTrain.numInstances());
 
-			Instance instance = instancesTrain.instance(randSample);
-			int x_C_V = (int) instance.classValue();
-			double[] probs_V = predict(instance);
-			
-			SUtils.exp(probs_V);
-			
-			double sum = computeGradSum(instance, probs_V, x_C_V);
-			double alpha = 0.001;
-			//double alpha = 0.001 * m_Eta;
-			//m_Lambda = Math.max(m_Lambda + alpha *sum, 0);
-			m_Lambda = m_Lambda + alpha * m_Lambda * sum;
+		if (isM_DoAdaptiveRegularization()) {
+
+			if (m_DoAdaptiveRegularization == 1) {
+				/* Rendle's adaptive regularization */
+
+				MersenneTwister rg = new MersenneTwister();
+				int randSample = rg.nextInt(instances.numInstances());
+
+				Instance instance = instances.instance(randSample);
+				int x_C_V = (int) instance.classValue();
+				double[] probs_V = predict(instance);
+
+				SUtils.exp(probs_V);
+
+				double sum = computeGradSum(instance, probs_V, x_C_V);
+				//double alpha = 0.001;
+				double alpha = m_Eta;
+
+				m_Lambda = Math.max(m_Lambda + alpha * sum, 0);
+				//m_Lambda = m_Lambda + alpha * m_Lambda * sum;
+
+				//System.out.println(m_Lambda);
+
+			} else if (m_DoAdaptiveRegularization == 2) {
+				/* Foster's adaptive regularization */
+
+				MersenneTwister rg = new MersenneTwister();
+				int randSample = rg.nextInt(instancesTrain.numInstances());
+
+				Instance instance = instancesTrain.instance(randSample);
+				int x_C_V = (int) instance.classValue();
+				double[] probs_V = predict(instance);
+
+				SUtils.exp(probs_V);
+
+				double sum = computeGradSum(instance, probs_V, x_C_V);
+				double alpha = 0.001;
+
+				m_Lambda = m_Lambda + alpha * m_Lambda * sum;
+
+				System.out.println(m_Lambda);
+
+			} else if (m_DoAdaptiveRegularization == 3) {
+				/* Nayyar's adaptive regularization -- every iteration*/
+
+				// Nothing here, update the regularization after every iteration
+
+			} else if (m_DoAdaptiveRegularization == 4) {
+				/* Nayyar's adaptive regularization -- every data point*/
+
+				MersenneTwister rg = new MersenneTwister();
+				int randSample = rg.nextInt(instancesTrain.numInstances());
+
+				Instance instance = instancesTrain.instance(randSample);
+				int x_C_V = (int) instance.classValue();
+
+				double[] probs_V = predict(instance);
+				double[] probs_MAP = predictMAP(instance);
+
+				SUtils.exp(probs_V);
+				SUtils.exp(probs_MAP);
+
+				double m_RMSE_V = 0;
+				double m_RMSE_MAP = 0;
+				for (int y = 0; y < nc; y++) {
+					m_RMSE_V += (1 / (double) nc * Math.pow((probs_V[y] - ((y == x_C) ? 1 : 0)), 2));
+					m_RMSE_MAP += (1 / (double) nc * Math.pow((probs_MAP[y] - ((y == x_C) ? 1 : 0)), 2));
+				}
+
+				double diff = m_RMSE_V - m_RMSE_MAP;
+				m_LambdaLog += 0.1 * diff;
+				m_Lambda += Math.pow(10, m_LambdaLog);
+
+				//System.out.println(m_Lambda + ", " + m_LambdaLog);
+			}
+
 		}
 
 	}
@@ -1669,10 +1827,11 @@ public class fuplaOOC {
 		this.structure = reader.getStructure();
 		structure.setClassIndex(structure.numAttributes() - 1);
 
-		Instances[] instancesList = new Instances[2];
+		Instances[] instancesList = new Instances[3];
 
 		Instances instancesTrain = new Instances(structure);
 		Instances instancesTest = new Instances(structure);
+		Instances instances = new Instances(structure);
 
 		int nvalidation = indexList.size();
 
@@ -1680,6 +1839,8 @@ public class fuplaOOC {
 		Instance row;
 		while ((row = reader.readInstance(structure)) != null)  {
 			if (indexList.contains(i)) {
+				instances.add(row);
+
 				if (nvalidation % 5 == 0) {
 					instancesTest.add(row);
 				} else {
@@ -1691,9 +1852,11 @@ public class fuplaOOC {
 		}
 
 		instancesList[0] = instancesTrain;
-		instancesList[1] = instancesTrain;
+		instancesList[1] = instancesTest;
+		instancesList[2] = instances;
 
 		System.out.println("-- Train Test files created for cross-validating step size -- Train = " + instancesTrain.numInstances() + ", and Test = " + instancesTest.numInstances());
+		System.out.println("-- Dataset (CV) = " + instances.numInstances());
 
 		return instancesList;
 	}
@@ -1921,10 +2084,13 @@ public class fuplaOOC {
 	}
 
 	public static boolean isM_DoAdaptiveRegularization() {
-		return m_DoAdaptiveRegularization;
+		if (m_DoAdaptiveRegularization == 0)
+			return false;
+		else
+			return true;
 	}
 
-	public static void setM_DoAdaptiveRegularization(boolean m_DoAdaptiveRegularization) {
+	public static void setM_DoAdaptiveRegularization(int m_DoAdaptiveRegularization) {
 		fuplaOOC.m_DoAdaptiveRegularization = m_DoAdaptiveRegularization;
 	}
 
